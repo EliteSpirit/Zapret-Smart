@@ -84,8 +84,12 @@ jobs:
           # Номер приходит через переменную окружения, а не подстановкой в текст скрипта, и проверяется по формату.
           $version = "$env:ZS_VERSION".TrimStart('v')
           if ($version -and $version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$') { throw "bad version: $version" }
-          $versionArgs = if ($version) { @("-p:Version=$version") } else { @() }
+          # Не `$versionArgs = if (...) { @(...) }`: if отдаёт массив из одного элемента строкой,
+          # и @versionArgs раскладывал её по символам («- p : V e r s i o n»).
+          $versionArgs = @()
+          if ($version) { $versionArgs += "-p:Version=$version" }
           dotnet publish src/ZapretSmart.App -c Release -r win-x64 --self-contained -o $out @versionArgs
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
           $engine = "$out/engine"
           Copy-Item engine/nfq/winws.exe $engine
           Copy-Item C:/cygwin/bin/cygwin1.dll $engine
