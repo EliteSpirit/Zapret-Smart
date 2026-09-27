@@ -13,6 +13,18 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void WatchdogAndTrayAreOnByDefaultEvenForOldSettingsFiles()
+    {
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "settings.json");
+        File.WriteAllText(path, """{ "communityEnabled": false, "selectedStrategyId": "x" }""");
+        var loaded = new SettingsStore(path).Load();
+        Assert.True(loaded.WatchdogEnabled);
+        Assert.True(loaded.CloseToTray);
+        Assert.True(new AppSettings().WatchdogEnabled);
+    }
+
+    [Fact]
     public void RoundTrips()
     {
         var store = new SettingsStore(Path.Combine(_dir, "settings.json"));

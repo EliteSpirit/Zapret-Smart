@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -317,6 +318,48 @@ public sealed class EditorTests : IDisposable
         var vm = CreateVm();
         vm.Dispose();
         Assert.False(vm.StartCommand.CanExecute(null));
+    }
+
+    [AvaloniaFact]
+    public void DuringStrategySwitchOnlyStopIsAvailable()
+    {
+        var vm = CreateVm();
+        vm.IsSwitching = true;
+        Assert.False(vm.StartCommand.CanExecute(null));
+        Assert.True(vm.StopCommand.CanExecute(null));
+        vm.IsSwitching = false;
+    }
+
+    [AvaloniaFact]
+    public void WatchdogAndTraySettingsPersist()
+    {
+        var vm = CreateVm();
+        Assert.True(vm.WatchdogEnabled);
+        vm.WatchdogEnabled = false;
+        vm.CloseToTray = false;
+        var again = CreateVm();
+        Assert.False(again.WatchdogEnabled);
+        Assert.False(again.CloseToTray);
+    }
+
+    [AvaloniaFact]
+    public void TabSwitchPlaysEnterAnimation()
+    {
+        var vm = CreateVm();
+        var w = new MainWindow { DataContext = vm };
+        w.Show();
+        var tabs = w.GetVisualDescendants().OfType<TabControl>().Single();
+        tabs.SelectedIndex = 3;
+        Dispatcher.UIThread.RunJobs();
+        AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+        var page = (Visual)tabs.SelectedContent!;
+        Assert.True(page.Opacity < 1, "содержимое вкладки должно появляться, а не выскакивать");
+        for (var i = 0; i < 60; i++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+        }
+        Assert.Equal(1, page.Opacity, 3);
     }
 
     [AvaloniaFact]

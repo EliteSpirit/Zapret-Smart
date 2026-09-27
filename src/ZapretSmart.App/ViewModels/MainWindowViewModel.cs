@@ -4,7 +4,10 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ZapretSmart.Core.Engine;
+using ZapretSmart.Core.Community;
 using ZapretSmart.Core.Lists;
+using ZapretSmart.Core.Search;
+using ZapretSmart.Core.Watchdog;
 using ZapretSmart.Core.Settings;
 using ZapretSmart.Core.Storage;
 using ZapretSmart.Core.Strategies;
@@ -27,6 +30,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private AppSettings _settings;
     private bool _stopRequested;
     private bool _disposed;
+    private CancellationTokenSource? _watchdogCts;
+
+    public static readonly TimeSpan WatchdogFirstCheck = TimeSpan.FromSeconds(20);
+    public static readonly TimeSpan WatchdogInterval = TimeSpan.FromMinutes(5);
+    public static IReadOnlyList<string> CheckTargets => CommunityReports.StandardTargets;
 
     public MainWindowViewModel(AppPaths paths)
     {
@@ -34,6 +42,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _settingsStore = new SettingsStore(paths.SettingsFile);
         _settings = _settingsStore.Load();
         _communityEnabled = _settings.CommunityEnabled;
+        _watchdogEnabled = _settings.WatchdogEnabled;
+        _closeToTray = _settings.CloseToTray;
 
         ListStore = new ListStore(paths.Layout, paths.BundledListsDir);
         UserStrategies = new UserStrategyStore(paths.UserStrategiesDir);
@@ -92,16 +102,38 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnCommunityEnabledChanged(bool value) => SaveSettings(_settings with { CommunityEnabled = value });
 
+    [ObservableProperty] private bool _watchdogEnabled;
+    [ObservableProperty] private bool _closeToTray;
+    [ObservableProperty] private string _watchdogStatus = "";
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(StartCommand))]
+    [NotifyCanExecuteChangedFor(nameof(StopCommand))]
+    private bool _isSwitching;
+
+    partial void OnCloseToTrayChanged(bool value) => SaveSettings(_settings with { CloseToTray = value });
+
+    partial void OnWatchdogEnabledChanged(bool value)
+    {
+        SaveSettings(_settings with { WatchdogEnabled = value });
+        if (!value) StopWatchdog();
+        else if (IsRunning) StartWatchdog();
+    }
+
     partial void OnSelectedStrategyChanged(StrategyItem? value) =>
         SaveSettings(_settings with { SelectedStrategyId = value?.Strategy.Id });
 
     partial void OnIsSearchingChanged(bool value) => UpdateStatus();
 
     // После Dispose ничего не запускаем: иначе движок остался бы работать без окна.
-    private bool CanStart() => !_disposed && IsWindows && !IsRunning && !IsSearching && SelectedStrategy is not null;
+    private bool CanStart() => !_disposed && IsWindows && !IsRunning && !IsSearching && !IsSwitching && SelectedStrategy is not null;
 
     [RelayCommand(CanExecute = nameof(CanStart))]
     private void Start()
+    {
+        if (StartEngine() && WatchdogEnabled) StartWatchdog();
+    }
+
+    private bool StartEngine()
     {
         try
         {
@@ -111,6 +143,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _stopRequested = false;
             _runner.Start(cmd.Argv);
             IsRunning = true;
+            UpdateStatus();
+            return true;
         }
         catch (StrategyRejectedException e)
         {
@@ -125,14 +159,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             AppendLog("! Не удалось запустить движок: " + e.Message + ". Приложение запущено от администратора? Не заблокировал ли winws.exe антивирус?");
         }
         UpdateStatus();
+        return false;
     }
 
-    private bool CanStop() => IsRunning;
+    private bool CanStop() => IsRunning || IsSwitching;
 
     [RelayCommand(CanExecute = nameof(CanStop))]
     private Task Stop() => StopEngineAsync();
 
     public async Task StopEngineAsync()
+    {
+        StopWatchdog();
+        await StopEngineOnlyAsync();
+    }
+
+    private async Task StopEngineOnlyAsync()
     {
         if (!IsRunning) return;
         _stopRequested = true;
@@ -201,6 +242,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void UpdateStatus() =>
         StatusText = !IsWindows ? "Движок работает только под Windows"
+            : IsSwitching ? "Сторож подбирает стратегию"
             : IsSearching ? "Идёт поиск стратегии"
             : IsRunning ? "Обход включён"
             : "Обход выключен";
@@ -219,9 +261,98 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void StartWatchdog()
+    {
+        StopWatchdog();
+        _watchdogCts = new CancellationTokenSource();
+        _ = RunWatchdogAsync(_watchdogCts.Token);
+    }
+
+    private void StopWatchdog()
+    {
+        _watchdogCts?.Cancel();
+        _watchdogCts?.Dispose();
+        _watchdogCts = null;
+        WatchdogStatus = "";
+    }
+
+    private async Task RunWatchdogAsync(CancellationToken ct)
+    {
+        var tracker = new HealthTracker(failuresBeforeSwitch: 2, switchCooldown: TimeSpan.FromMinutes(30));
+        var prober = new HttpsProber(TimeSpan.FromSeconds(8));
+        var targets = CheckTargets;
+        var delay = WatchdogFirstCheck;
+        var warnedNeverWorked = false;
+        WatchdogStatus = "Сторож: первая проверка через несколько секунд";
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(delay, ct);
+                delay = WatchdogInterval;
+                if (!IsRunning || IsSearching) continue;
+
+                var passed = await StrategyRanker.CheckAsync(prober, targets, ct);
+                WatchdogStatus = $"Сторож: {DateTime.Now:HH:mm}, открываются {passed} из {targets.Count} проверочных сайтов";
+                switch (tracker.Observe(passed, DateTime.UtcNow))
+                {
+                    case HealthVerdict.NeverWorked when !warnedNeverWorked:
+                        warnedNeverWorked = true;
+                        AppendLog("Сторож: с этой стратегией проверочные сайты не открываются. Переключаться вслепую не буду: запустите поиск.");
+                        break;
+                    case HealthVerdict.Degraded:
+                        AppendLog($"Сторож: открываются {passed} из {targets.Count}, было {tracker.Baseline}. Проверю ещё раз.");
+                        break;
+                    case HealthVerdict.Cooldown:
+                        AppendLog("Сторож: снова хуже, но стратегию уже меняли недавно. Жду, чтобы не метаться.");
+                        break;
+                    case HealthVerdict.Switch:
+                        await SwitchStrategyAsync(tracker, prober, targets, passed, ct);
+                        break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task SwitchStrategyAsync(HealthTracker tracker, IProber prober, IReadOnlyList<string> targets, int passedNow, CancellationToken ct)
+    {
+        var current = SelectedStrategy!;
+        AppendLog($"Сторож: сайты перестали открываться ({passedNow} из {targets.Count}), проверяю стратегии");
+        IsSwitching = true;
+        UpdateStatus();
+        try
+        {
+            await StopEngineOnlyAsync();
+            // Текущая идёт первой: при равенстве остаёмся на ней, сбой мог быть временным.
+            var candidates = Strategies.Where(s => s.Strategy.Intercept.Tcp is not null).Select(s => s.Strategy)
+                .OrderBy(s => s.Id == current.Strategy.Id ? 0 : 1).ToList();
+            using var host = new WinwsEngineHost(Paths.EngineExe, Paths.Layout, TimeSpan.FromSeconds(8));
+            var ranked = await new StrategyRanker(host, prober).RankAsync(candidates, targets, ct);
+            var best = ranked[0];
+            var switched = best.Strategy.Id != current.Strategy.Id;
+            SelectedStrategy = Strategies.FirstOrDefault(s => s.Strategy.Id == best.Strategy.Id) ?? current;
+            AppendLog(switched
+                ? $"Сторож: переключено на «{best.Strategy.Name}», открываются {best.Passed} из {best.Total}"
+                : $"Сторож: другие стратегии не лучше, «{current.Name}» перезапущена ({best.Passed} из {best.Total})");
+            tracker.Restarted(best.Passed, DateTime.UtcNow, switched);
+        }
+        finally
+        {
+            IsSwitching = false;
+            // Отмена значит «Выключить» или закрытие приложения: тогда обход не возвращаем.
+            if (ct.IsCancellationRequested) AppendLog("Сторож: подбор прерван, обход выключен");
+            else if (!_disposed && !IsRunning) StartEngine();
+            UpdateStatus();
+        }
+    }
+
     public void Dispose()
     {
         _disposed = true;
+        StopWatchdog();
         Search.Dispose();
         _runner.Dispose();
     }

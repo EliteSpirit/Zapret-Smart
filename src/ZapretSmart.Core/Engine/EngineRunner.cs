@@ -7,6 +7,10 @@ public sealed class EngineRunner(string executablePath) : IDisposable
     private readonly object _gate = new();
     private Process? _process;
 
+    /// <summary>Одно задание на всё приложение: дескриптор живёт до конца процесса и закрывается ОС при его смерти.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static readonly Lazy<KillOnCloseJob> SharedJob = new(() => new KillOnCloseJob());
+
     public event Action<string>? Output;
     public event Action<int>? Exited;
 
@@ -58,9 +62,24 @@ public sealed class EngineRunner(string executablePath) : IDisposable
             };
 
             p.Start();
+            BindToAppLifetime(p);
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
             _process = p;
+        }
+    }
+
+    private void BindToAppLifetime(Process p)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            SharedJob.Value.Assign(p);
+        }
+        catch (System.ComponentModel.Win32Exception e)
+        {
+            // Движок работает и без этого, но при падении приложения останется в фоне: предупреждаем, а не падаем.
+            Output?.Invoke("! Движок не привязан к приложению (" + e.Message + "): при аварийном закрытии его придётся завершить вручную");
         }
     }
 

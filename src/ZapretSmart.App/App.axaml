@@ -12,6 +12,7 @@
     <SolidColorBrush x:Key="ZsAccent" Color="#3DD6B5" />
     <SolidColorBrush x:Key="ZsAccentText" Color="#062A22" />
     <SolidColorBrush x:Key="ZsDanger" Color="#FF6B6B" />
+    <SolidColorBrush x:Key="ZsWarning" Color="#F5B94A" />
   </Application.Resources>
 
   <Application.Styles>
@@ -76,6 +77,93 @@
       <Setter Property="Foreground" Value="{StaticResource ZsDanger}" />
       <Setter Property="CornerRadius" Value="10" />
       <Setter Property="Padding" Value="28,12" />
+    </Style>
+
+    <!--
+      Движение. Кривая ease-out с сильным стартом (0.23,1,0.32,1): отклик виден сразу.
+      Всё короче 300 мс. Анимируются только прозрачность и трансформации.
+      .reduced-motion на окне (в Windows выключены эффекты анимации) убирает движение и оставляет смену прозрачности и цвета.
+    -->
+
+    <!-- Нажатие: кнопка чуть сжимается. Fluent сжимает до 0.98 рывком, здесь то же, но плавно. -->
+    <Style Selector="Button">
+      <Setter Property="Transitions">
+        <Transitions>
+          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" Easing="0.23,1,0.32,1" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Window:not(.reduced-motion) Button:pressed">
+      <Setter Property="RenderTransform" Value="scale(0.97)" />
+    </Style>
+    <Style Selector="Window.reduced-motion Button:pressed">
+      <Setter Property="RenderTransform" Value="none" />
+    </Style>
+
+    <!-- Пункты навигации: смена фона и цвета текста без рывка. -->
+    <Style Selector="TabControl.nav TabItem">
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.15" />
+          <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+        </Transitions>
+      </Setter>
+    </Style>
+
+    <!-- Индикатор статуса: точка меняет цвет плавно, при включённом обходе от неё расходится кольцо. -->
+    <Style Selector="Ellipse.dot">
+      <Setter Property="Fill" Value="{StaticResource ZsTextMuted}" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Fill" Duration="0:0:0.25" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Ellipse.dot.on">
+      <Setter Property="Fill" Value="{StaticResource ZsAccent}" />
+    </Style>
+    <Style Selector="Ellipse.dot.busy">
+      <Setter Property="Fill" Value="{StaticResource ZsWarning}" />
+    </Style>
+    <Style Selector="Ellipse.pulse">
+      <Setter Property="Fill" Value="{StaticResource ZsAccent}" />
+      <Setter Property="Opacity" Value="0" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+    </Style>
+    <Style Selector="Ellipse.pulse.busy">
+      <Setter Property="Fill" Value="{StaticResource ZsWarning}" />
+    </Style>
+    <Style Selector="Window:not(.reduced-motion) Ellipse.pulse.on, Window:not(.reduced-motion) Ellipse.pulse.busy">
+      <Style.Animations>
+        <Animation Duration="0:0:1.8" IterationCount="Infinite">
+          <KeyFrame Cue="0%">
+            <Setter Property="Opacity" Value="0.45" />
+            <Setter Property="ScaleTransform.ScaleX" Value="1" />
+            <Setter Property="ScaleTransform.ScaleY" Value="1" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="ScaleTransform.ScaleX" Value="2.4" />
+            <Setter Property="ScaleTransform.ScaleY" Value="2.4" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
+    <!-- Новые строки в списке проверенных вариантов появляются, а не выскакивают. -->
+    <Style Selector="Window:not(.reduced-motion) ItemsControl.appear ContentPresenter">
+      <Style.Animations>
+        <Animation Duration="0:0:0.2" Easing="0.23,1,0.32,1">
+          <KeyFrame Cue="0%">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="TranslateTransform.Y" Value="-4" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="TranslateTransform.Y" Value="0" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
     </Style>
   </Application.Styles>
 </Application>

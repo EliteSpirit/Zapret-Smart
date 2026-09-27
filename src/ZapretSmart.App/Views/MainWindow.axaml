@@ -5,6 +5,7 @@
         x:Class="ZapretSmart.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Zapret Smart"
+        Icon="/Assets/app.png"
         Width="1100" Height="720" MinWidth="900" MinHeight="560"
         Background="{StaticResource ZsBackground}">
 
@@ -16,13 +17,23 @@
       <TextBlock Text="SMART" FontSize="11" FontWeight="SemiBold" LetterSpacing="3" Foreground="{StaticResource ZsAccent}" />
     </StackPanel>
 
-    <TabControl Classes="nav">
+    <TabControl Classes="nav" x:Name="Tabs">
 
       <!-- Обход -->
       <TabItem Header="Обход">
         <ScrollViewer Padding="28">
           <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Stretch">
-            <TextBlock Classes="h1" Text="{Binding StatusText}" />
+            <StackPanel Spacing="6">
+              <StackPanel Orientation="Horizontal" Spacing="14">
+                <Panel Width="14" Height="14" VerticalAlignment="Center">
+                  <Ellipse Classes="pulse" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsSwitching}" />
+                  <Ellipse Classes="dot" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsSwitching}" />
+                </Panel>
+                <TextBlock Classes="h1" Text="{Binding StatusText}" />
+              </StackPanel>
+              <TextBlock Classes="muted" Text="{Binding WatchdogStatus}" Margin="28,0,0,0"
+                         IsVisible="{Binding WatchdogStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
 
             <Border Classes="card">
               <StackPanel Spacing="14">
@@ -240,7 +251,7 @@
             <Border Classes="card" IsVisible="{Binding Tested.Count}">
               <StackPanel Spacing="8">
                 <TextBlock Classes="muted" Text="Проверенные варианты" />
-                <ItemsControl ItemsSource="{Binding Tested}">
+                <ItemsControl ItemsSource="{Binding Tested}" Classes="appear">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:ScoreRow">
                       <Grid ColumnDefinitions="*,120,80" Margin="0,3">
@@ -262,6 +273,19 @@
         <ScrollViewer Padding="28">
           <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Stretch">
             <TextBlock Classes="h1" Text="Настройки" />
+            <Border Classes="card">
+              <StackPanel Spacing="10">
+                <ToggleSwitch IsChecked="{Binding WatchdogEnabled}" OnContent="Сторож включён" OffContent="Сторож выключен" />
+                <TextBlock Classes="muted" Text="Пока обход работает, сторож раз в 5 минут проверяет www.youtube.com, discord.com и rutracker.org. Если открывается меньше, чем сразу после включения, и так две проверки подряд, он проверяет остальные стратегии и переключается на лучшую. Между переключениями не меньше 30 минут." />
+                <TextBlock Classes="muted" Text="Если с текущей стратегией эти сайты не открывались с самого начала, сторож не переключает вслепую и советует запустить поиск." />
+              </StackPanel>
+            </Border>
+            <Border Classes="card">
+              <StackPanel Spacing="10">
+                <ToggleSwitch IsChecked="{Binding CloseToTray}" OnContent="Закрытие окна прячет в трей" OffContent="Закрытие окна выключает обход" />
+                <TextBlock Classes="muted" Text="Пока обход включён, крестик прячет окно в трей, и обход продолжает работать. Выйти насовсем можно через меню значка в трее." />
+              </StackPanel>
+            </Border>
             <Border Classes="card">
               <StackPanel Spacing="10">
                 <ToggleSwitch IsChecked="{Binding CommunityEnabled}" OnContent="Обмен с сообществом включён"
