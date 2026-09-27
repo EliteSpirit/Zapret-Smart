@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using ZapretSmart.Core.Engine;
+using ZapretSmart.Core.Search;
 using ZapretSmart.Core.Strategies;
 
 namespace ZapretSmart.Core.Tests;
@@ -32,6 +33,9 @@ public class EngineDryRunTests
     public static IEnumerable<object[]> AcceptedArgs() =>
         StrategyValidatorTests.AcceptedArgs.Select(a => new object[] { a });
 
+    public static IEnumerable<object[]> SearchCandidates() =>
+        StrategySearchTests.AllGenerated().Select(c => new object[] { c.Label, string.Join('\n', c.Args) });
+
     [EngineTheory]
     [MemberData(nameof(Presets))]
     public void PresetIsAcceptedByEngine(string file)
@@ -52,6 +56,15 @@ public class EngineDryRunTests
             Profiles = [new Profile { Args = ["dpi-desync=fake", arg] }],
         };
         AssertEngineAccepts(EngineCommandBuilder.Build(s, Layout));
+    }
+
+    [EngineTheory]
+    [MemberData(nameof(SearchCandidates))]
+    public void SearchCandidateIsAcceptedByEngine(string label, string args)
+    {
+        _ = label;
+        var c = new Candidate(label, args.Split('\n'));
+        AssertEngineAccepts(EngineCommandBuilder.Build(CandidateGenerator.ToStrategy(c, "t", "t", "general", ""), Layout));
     }
 
     private static void AssertEngineAccepts(IReadOnlyList<string> argv)

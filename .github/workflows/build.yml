@@ -74,9 +74,10 @@ jobs:
           Copy-Item "windivert/WinDivert-$env:WINDIVERT_VERSION-A/x64/WinDivert64.sys" $engine
           Copy-Item LICENSE, engine/LICENSE.zapret.txt $out
 
-      - name: Test (with winws dry-run)
+      - name: Test (winws dry-run + live WinDivert)
         env:
           ZS_ENGINE: ${{ github.workspace }}\artifacts\ZapretSmart\engine\winws.exe
+          ZS_LIVE: "1"
         run: dotnet test -c Release
 
       - uses: actions/upload-artifact@v4

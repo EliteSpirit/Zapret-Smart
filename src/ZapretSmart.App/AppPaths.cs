@@ -6,6 +6,7 @@ namespace ZapretSmart.App;
 public sealed record AppPaths(
     string EngineExe,
     EngineLayout Layout,
+    string BundledListsDir,
     string PresetsDir,
     string UserStrategiesDir,
     string SettingsFile)
@@ -20,7 +21,8 @@ public sealed record AppPaths(
                 EngineExe: Path.Combine(baseDir, "engine", "winws.exe"),
                 Layout: new EngineLayout(
                     FakeDir: Path.Combine(baseDir, "engine", "fake"),
-                    ListsDir: Path.Combine(baseDir, "lists")),
+                    ListsDir: Path.Combine(dataDir, "lists")),
+                BundledListsDir: Path.Combine(baseDir, "lists"),
                 PresetsDir: Path.Combine(baseDir, "strategies"),
                 UserStrategiesDir: Path.Combine(dataDir, "strategies"),
                 SettingsFile: SettingsStore.DefaultPath);

@@ -19,28 +19,28 @@ public static class StrategyValidator
         if (!IdRe.IsMatch(s.Id ?? ""))
             errors.Add("id: допустимы только a-z, 0-9, '_' и '-', до 64 символов");
         if (string.IsNullOrWhiteSpace(s.Name) || s.Name.Length > 100)
-            errors.Add("name: обязательно, до 100 символов");
+            errors.Add("Название: обязательно, до 100 символов");
         if (s.Description is { Length: > 2000 })
-            errors.Add("description: не длиннее 2000 символов");
+            errors.Add("Описание: не длиннее 2000 символов");
 
         if (s.Intercept is null || (s.Intercept.Tcp is null && s.Intercept.Udp is null))
-            errors.Add("intercept: нужно указать хотя бы tcp или udp");
+            errors.Add("Перехват: укажите порты TCP или UDP");
         else
         {
             if (s.Intercept.Tcp is not null && !EngineOptionCatalog.IsPortList(s.Intercept.Tcp))
-                errors.Add($"intercept.tcp: некорректный список портов '{s.Intercept.Tcp}'");
+                errors.Add($"Перехват TCP: некорректный список портов '{s.Intercept.Tcp}'");
             if (s.Intercept.Udp is not null && !EngineOptionCatalog.IsPortList(s.Intercept.Udp))
-                errors.Add($"intercept.udp: некорректный список портов '{s.Intercept.Udp}'");
+                errors.Add($"Перехват UDP: некорректный список портов '{s.Intercept.Udp}'");
         }
 
         if (s.Profiles is null || s.Profiles.Count == 0)
-            errors.Add("profiles: нужен хотя бы один профиль");
+            errors.Add("Нужен хотя бы один профиль");
         else if (s.Profiles.Count > MaxProfiles)
-            errors.Add($"profiles: не больше {MaxProfiles}");
+            errors.Add($"Не больше {MaxProfiles} профилей");
         else
         {
             for (var i = 0; i < s.Profiles.Count; i++)
-                ValidateProfile(s.Profiles[i], $"profiles[{i}]", errors);
+                ValidateProfile(s.Profiles[i], $"Профиль {i + 1}", errors);
         }
 
         return errors;
@@ -51,16 +51,16 @@ public static class StrategyValidator
     private static void ValidateProfile(Profile p, string path, List<string> errors)
     {
         if (p.Hostlist is not null && !IsValidListId(p.Hostlist))
-            errors.Add($"{path}.hostlist: ожидается идентификатор списка, а не путь");
+            errors.Add($"{path}, список доменов: ожидается имя списка, а не путь");
 
         if (p.Args is null || p.Args.Count == 0)
         {
-            errors.Add($"{path}.args: пусто");
+            errors.Add($"{path}: нет ни одной опции");
             return;
         }
         if (p.Args.Count > MaxArgsPerProfile)
         {
-            errors.Add($"{path}.args: не больше {MaxArgsPerProfile}");
+            errors.Add($"{path}: не больше {MaxArgsPerProfile} опций");
             return;
         }
 
@@ -70,7 +70,7 @@ public static class StrategyValidator
             if (TryParseArg(p.Args[j], out var arg, out var error))
                 hasDesync |= arg.Name is "dpi-desync" or "dup" or "wssize" or "hostcase" or "hostspell" or "domcase" or "methodeol" or "hostnospace";
             else
-                errors.Add($"{path}.args[{j}]: {error}");
+                errors.Add($"{path}, строка {j + 1}: {error}");
         }
         if (!hasDesync)
             errors.Add($"{path}: профиль ничего не делает с трафиком (нет dpi-desync или модификаторов)");

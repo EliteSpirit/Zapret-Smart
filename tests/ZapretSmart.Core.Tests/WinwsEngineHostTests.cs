@@ -1,0 +1,137 @@
+using System.Diagnostics;
+using ZapretSmart.Core.Engine;
+using ZapretSmart.Core.Search;
+
+namespace ZapretSmart.Core.Tests;
+
+/// <summary>
+/// Управление процессом движка на подставном исполняемом файле (sh-скрипт вместо winws):
+/// ожидание строки готовности, таймаут, выход до готовности, остановка и принудительное завершение.
+/// </summary>
+public sealed class WinwsEngineHostTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "zs-host-" + Guid.NewGuid().ToString("N"));
+
+    public sealed class UnixFactAttribute : FactAttribute
+    {
+        public UnixFactAttribute()
+        {
+            if (OperatingSystem.IsWindows()) Skip = "подставной движок — sh-скрипт";
+        }
+    }
+
+    public WinwsEngineHostTests()
+    {
+        Directory.CreateDirectory(Path.Combine(_dir, "lists"));
+        File.WriteAllText(Path.Combine(_dir, "lists", SearchOptions.TargetsListId + ".txt"), "example.com");
+    }
+
+    private string PidFile => Path.Combine(_dir, "pid");
+
+    private WinwsEngineHost HostWith(string script, TimeSpan? timeout = null)
+    {
+        var exe = Path.Combine(_dir, "fake-winws");
+        File.WriteAllText(exe, "#!/bin/sh\necho $$ > '" + PidFile + "'\n" + script + "\n");
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(exe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return new WinwsEngineHost(exe, new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(_dir, "lists")),
+            timeout ?? TimeSpan.FromSeconds(10));
+    }
+
+    private static readonly Candidate Split = new("x", ["dpi-desync=multisplit"]);
+    private static ZapretSmart.Core.Strategies.Strategy Probe => CandidateGenerator.ToProbeStrategy(Split, SearchOptions.TargetsListId);
+
+    private int EnginePid() => int.Parse(File.ReadAllText(PidFile).Trim());
+
+    private static bool IsAlive(int pid)
+    {
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static void AssertGone(int pid)
+    {
+        var sw = Stopwatch.StartNew();
+        while (IsAlive(pid) && sw.ElapsedMilliseconds < 5000) Thread.Sleep(50);
+        Assert.False(IsAlive(pid), "процесс движка не завершён");
+    }
+
+    [UnixFact]
+    public async Task StartReturnsOnReadyMarkerAndSessionStopsEngine()
+    {
+        using var host = HostWith("echo 'windivert initialized. capture is started.'\nexec sleep 30");
+        var session = await host.StartAsync(Probe, CancellationToken.None);
+        var pid = EnginePid();
+        Assert.True(IsAlive(pid));
+        await session.DisposeAsync();
+        AssertGone(pid);
+    }
+
+    [UnixFact]
+    public async Task ExitBeforeReadyIsStartFailureWithOutput()
+    {
+        using var host = HostWith("echo 'A copy of winws is already running with the same filter'\nexit 1");
+        var e = await Assert.ThrowsAsync<EngineStartException>(() => host.StartAsync(Probe, CancellationToken.None));
+        Assert.Contains("already running", e.Message);
+        Assert.Contains("кодом 1", e.Message);
+    }
+
+    [UnixFact]
+    public async Task MissingMarkerTimesOutAndKillsEngine()
+    {
+        using var host = HostWith("echo 'starting'\nexec sleep 30", TimeSpan.FromMilliseconds(700));
+        var e = await Assert.ThrowsAsync<EngineStartException>(() => host.StartAsync(Probe, CancellationToken.None));
+        Assert.Contains("не начал перехват", e.Message);
+        AssertGone(EnginePid());
+    }
+
+    [UnixFact]
+    public async Task CancellationWhileWaitingKillsEngine()
+    {
+        using var host = HostWith("exec sleep 30");
+        using var cts = new CancellationTokenSource(500);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.StartAsync(Probe, cts.Token));
+        AssertGone(EnginePid());
+    }
+
+    [UnixFact]
+    public async Task HostDisposeKillsLiveEngineSynchronously()
+    {
+        var host = HostWith("echo 'capture is started'\nexec sleep 30");
+        await host.StartAsync(Probe, CancellationToken.None);
+        var pid = EnginePid();
+        Assert.True(IsAlive(pid));
+        host.Dispose();
+        AssertGone(pid);
+    }
+
+    [UnixFact]
+    public async Task EngineReceivesBuiltArguments()
+    {
+        var args = Path.Combine(_dir, "args");
+        using var host = HostWith($"printf '%s\\n' \"$@\" > '{args}'\necho 'capture is started'\nexec sleep 30");
+        await using (await host.StartAsync(Probe, CancellationToken.None)) { }
+        var lines = File.ReadAllLines(args);
+        Assert.Equal(["--wf-tcp=443", "--hostlist=" + Path.Combine(_dir, "lists", SearchOptions.TargetsListId + ".txt"), "--filter-tcp=443", "--dpi-desync=multisplit"], lines);
+    }
+
+    [Fact]
+    public async Task MissingExecutableIsNotSwallowed()
+    {
+        using var host = new WinwsEngineHost(Path.Combine(_dir, "nope.exe"),
+            new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(_dir, "lists")), TimeSpan.FromSeconds(1));
+        await Assert.ThrowsAsync<FileNotFoundException>(() => host.StartAsync(Probe, CancellationToken.None));
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
+    }
+}

@@ -186,7 +186,7 @@ public static class EngineOptionCatalog
     private static bool IsKeyValue(string item, string key, Func<string?, bool> value) =>
         item.StartsWith(key + "=", StringComparison.Ordinal) && value(item[(key.Length + 1)..]);
 
-    private static bool IsDomain(string? v) => v is not null && DomainRe.IsMatch(v);
+    public static bool IsDomain(string? v) => v is not null && DomainRe.IsMatch(v);
 
     public static bool IsPortList(string? v)
     {

@@ -37,7 +37,7 @@ public static class EngineCommandBuilder
             {
                 var list = Path.Combine(layout.ListsDir, profile.Hostlist + ".txt");
                 if (!File.Exists(list))
-                    errors.Add($"profiles[{i}].hostlist: нет списка '{profile.Hostlist}'");
+                    errors.Add($"Профиль {i + 1}: нет списка доменов '{profile.Hostlist}'");
                 argv.Add("--hostlist=" + list);
             }
 
@@ -49,7 +49,7 @@ public static class EngineCommandBuilder
                 {
                     var file = Path.Combine(layout.FakeDir, value);
                     if (!File.Exists(file))
-                        errors.Add($"profiles[{i}]: нет комплектного файла '{value}'");
+                        errors.Add($"Профиль {i + 1}: нет комплектного файла '{value}'");
                     value = file;
                 }
                 argv.Add(value is null ? "--" + arg.Name : $"--{arg.Name}={value}");
