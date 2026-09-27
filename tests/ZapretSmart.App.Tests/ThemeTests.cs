@@ -181,8 +181,50 @@ public sealed class ThemeTests : IDisposable
         Assert.Empty(overlay.Children);
     }
 
+    /// <summary>
+    /// Эффекты анимации Windows подменяются явно: на раннерах Windows Server они выключены,
+    /// и без подмены тест проверял бы настройки машины, а не приложение.
+    /// </summary>
     [AvaloniaFact]
     public void BackdropAnimatesOnlyWhenItIsSeenAndAllowed()
+    {
+        var reduced = Motion.IsReduced;
+        Motion.IsReduced = false;
+        try
+        {
+            BackdropAnimatesOnlyWhenItIsSeenAndAllowedCore();
+        }
+        finally
+        {
+            Motion.IsReduced = reduced;
+        }
+    }
+
+    [AvaloniaFact]
+    public void BackdropStandsStillWhenWindowsAnimationsAreOff()
+    {
+        var reduced = Motion.IsReduced;
+        Motion.IsReduced = true;
+        try
+        {
+            var vm = CreateVm();
+            vm.Theme = AppTheme.Winter;
+            var w = new MainWindow { DataContext = vm };
+            w.Show();
+            Pump();
+            var backdrop = w.GetVisualDescendants().OfType<BackdropView>().Single(b => b.Name == "Backdrop");
+            Assert.Equal(BackdropKind.Snow, backdrop.Kind);
+            Assert.True(vm.AnimatedBackdrop);
+            Assert.False(backdrop.IsRunning);
+            Assert.Contains("reduced-motion", w.Classes);
+        }
+        finally
+        {
+            Motion.IsReduced = reduced;
+        }
+    }
+
+    private void BackdropAnimatesOnlyWhenItIsSeenAndAllowedCore()
     {
         var vm = CreateVm();
         vm.Theme = AppTheme.Hacker;

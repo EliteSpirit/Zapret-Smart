@@ -10,7 +10,8 @@ public static class Motion
 {
     private const uint SpiGetClientAreaAnimation = 0x1042;
 
-    public static bool IsReduced { get; } = Detect();
+    /// <summary>Читается из Windows при запуске. Тесты подменяют значение, чтобы не зависеть от настроек машины, на которой идут.</summary>
+    public static bool IsReduced { get; internal set; } = Detect();
 
     private static bool Detect()
     {
