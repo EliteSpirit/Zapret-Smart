@@ -1,0 +1,4 @@
+Источник: https://github.com/bol-van/zapret
+Коммит:   d437963452674faadfd45adcd62466272b5a2fcd (2026-09-18)
+Взято:    nfq/ -> engine/nfq, files/fake/ -> engine/files/fake
+Лицензия: MIT, см. LICENSE.zapret.txt
