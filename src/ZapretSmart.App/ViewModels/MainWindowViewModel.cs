@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ZapretSmart.App.Theming;
 using ZapretSmart.Core.Engine;
 using ZapretSmart.Core.Community;
 using ZapretSmart.Core.Lists;
@@ -44,6 +45,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _communityEnabled = _settings.CommunityEnabled;
         _watchdogEnabled = _settings.WatchdogEnabled;
         _closeToTray = _settings.CloseToTray;
+        _theme = AppTheme.Find(_settings.ThemeId);
+        _animatedBackdrop = _settings.AnimatedBackdrop;
+        Themes = AppTheme.All.Select(t => new ThemeOption(t, selected => Theme = selected) { IsSelected = t == _theme }).ToList();
 
         ListStore = new ListStore(paths.Layout, paths.BundledListsDir);
         UserStrategies = new UserStrategyStore(paths.UserStrategiesDir);
@@ -81,6 +85,40 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public bool IsWindows => OperatingSystem.IsWindows();
 
+    public IReadOnlyList<ThemeOption> Themes { get; }
+
+    /// <summary>«версия 0.3.0»; у локальной сборки без номера — «версия dev».</summary>
+    public static string VersionText { get; } = FormatVersion(
+        typeof(MainWindowViewModel).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion);
+
+    public static string FormatVersion(string? informational)
+    {
+        var v = informational?.Split('+')[0];
+        return "версия " + (string.IsNullOrEmpty(v) || v.StartsWith("0.0.0", StringComparison.Ordinal) ? "dev" : v);
+    }
+
+    [ObservableProperty] private AppTheme _theme;
+
+    partial void OnThemeChanged(AppTheme value)
+    {
+        foreach (var t in Themes) t.IsSelected = t.Theme == value;
+        SaveSettings(_settings with { ThemeId = value.Id });
+    }
+
+    [ObservableProperty] private bool _animatedBackdrop;
+
+    partial void OnAnimatedBackdropChanged(bool value) => SaveSettings(_settings with { AnimatedBackdrop = value });
+
+    /// <summary>На месте «Включить» показывается «Выключить». Скрытая из пары кнопок всегда недоступна.</summary>
+    public bool ShowStop => IsRunning || IsSwitching;
+
+    /// <summary>Идёт работа, которая сама закончится: поиск или подбор стратегии сторожем.</summary>
+    public bool IsBusy => IsSearching || IsSwitching;
+
+    [ObservableProperty] private string _statusShort = "";
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
     private StrategyItem? _selectedStrategy;
@@ -88,10 +126,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
     [NotifyCanExecuteChangedFor(nameof(StopCommand))]
+    [NotifyPropertyChangedFor(nameof(ShowStop))]
     private bool _isRunning;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
+    [NotifyPropertyChangedFor(nameof(IsBusy))]
     private bool _isSearching;
 
     [ObservableProperty]
@@ -108,6 +148,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
     [NotifyCanExecuteChangedFor(nameof(StopCommand))]
+    [NotifyPropertyChangedFor(nameof(ShowStop))]
+    [NotifyPropertyChangedFor(nameof(IsBusy))]
     private bool _isSwitching;
 
     partial void OnCloseToTrayChanged(bool value) => SaveSettings(_settings with { CloseToTray = value });
@@ -240,12 +282,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         UpdateStatus();
     }
 
-    private void UpdateStatus() =>
+    private void UpdateStatus()
+    {
         StatusText = !IsWindows ? "Движок работает только под Windows"
             : IsSwitching ? "Сторож подбирает стратегию"
             : IsSearching ? "Идёт поиск стратегии"
             : IsRunning ? "Обход включён"
             : "Обход выключен";
+        StatusShort = !IsWindows ? "Только для Windows"
+            : IsSwitching ? "Подбор стратегии"
+            : IsSearching ? "Идёт поиск"
+            : IsRunning ? "Обход включён"
+            : "Обход выключен";
+    }
 
     private void SaveSettings(AppSettings settings)
     {
