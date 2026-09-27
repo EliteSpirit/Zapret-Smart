@@ -1,0 +1,46 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ZapretSmart-win-x64
+          path: ZapretSmart
+
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="ZapretSmart-${VERSION}-win-x64.zip"
+          (cd ZapretSmart && zip -qr "../$ZIP" .)
+          sha256sum "$ZIP" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+          printf '\n## SHA-256\n\n```\n%s\n```\n' "$(cat SHA256SUMS.txt)" >> notes.md
+          PRERELEASE=""
+          case "$GITHUB_REF_NAME" in v0.*|*-*) PRERELEASE="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" "$ZIP" SHA256SUMS.txt \
+            --title "Zapret Smart ${GITHUB_REF_NAME#v}" --notes-file notes.md $PRERELEASE --verify-tag

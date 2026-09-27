@@ -1,0 +1,323 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sys="using:System"
+        xmlns:vm="using:ZapretSmart.App.ViewModels"
+        x:Class="ZapretSmart.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Zapret Smart"
+        Width="1100" Height="720" MinWidth="900" MinHeight="560"
+        Background="{StaticResource ZsBackground}">
+
+  <Grid>
+    <Border Width="200" HorizontalAlignment="Left" Background="{StaticResource ZsSurface}"
+            BorderBrush="{StaticResource ZsBorder}" BorderThickness="0,0,1,0" />
+    <StackPanel Margin="24,22,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="2" IsHitTestVisible="False">
+      <TextBlock Text="Zapret" FontSize="20" FontWeight="Bold" Foreground="{StaticResource ZsText}" />
+      <TextBlock Text="SMART" FontSize="11" FontWeight="SemiBold" LetterSpacing="3" Foreground="{StaticResource ZsAccent}" />
+    </StackPanel>
+
+    <TabControl Classes="nav">
+
+      <!-- Обход -->
+      <TabItem Header="Обход">
+        <ScrollViewer Padding="28">
+          <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Stretch">
+            <TextBlock Classes="h1" Text="{Binding StatusText}" />
+
+            <Border Classes="card">
+              <StackPanel Spacing="14">
+                <TextBlock Text="Стратегия" Classes="muted" />
+                <ComboBox ItemsSource="{Binding Strategies}" SelectedItem="{Binding SelectedStrategy}"
+                          IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Stretch">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:StrategyItem">
+                      <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="{Binding SelectedStrategy.Description, FallbackValue=''}" Classes="muted" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <Button Classes="primary" Content="Включить" Command="{Binding StartCommand}" />
+                  <Button Classes="danger" Content="Выключить" Command="{Binding StopCommand}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+              <DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                  <Button DockPanel.Dock="Right" Content="Очистить" Command="{Binding ClearLogCommand}" />
+                  <TextBlock Text="Журнал движка" Classes="muted" VerticalAlignment="Center" />
+                </DockPanel>
+                <ListBox ItemsSource="{Binding Log}" Height="240" Background="Transparent"
+                         FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" />
+              </DockPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- Стратегии: список + конструктор -->
+      <TabItem Header="Стратегии">
+        <Grid ColumnDefinitions="260,*" Margin="28,28,28,0" DataContext="{Binding Editor}" x:DataType="vm:StrategyEditorViewModel">
+          <DockPanel Grid.Column="0" Margin="0,0,20,20">
+            <TextBlock DockPanel.Dock="Top" Classes="h1" Text="Стратегии" Margin="0,0,0,14" />
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+              <Button Content="Новая" Command="{Binding NewCommand}" />
+              <Button Content="Копия" Command="{Binding CopyCommand}" />
+              <Button Content="Удалить" Command="{Binding DeleteCommand}" />
+            </StackPanel>
+            <ItemsControl DockPanel.Dock="Bottom" ItemsSource="{Binding LoadErrors}" Margin="0,10,0,0">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="sys:String">
+                  <TextBlock Text="{Binding}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,4" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <ListBox ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem}" Background="Transparent">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:StrategyItem">
+                  <StackPanel Spacing="2" Margin="0,4">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Origin}" Classes="muted" FontSize="12" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+
+          <DockPanel Grid.Column="1">
+            <Border DockPanel.Dock="Bottom" Classes="card" Margin="0,12,0,20" Padding="16,12">
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Classes="primary" Content="Сохранить" Command="{Binding SaveCommand}"
+                        VerticalAlignment="Top" Margin="12,0,0,0" />
+                <TextBlock Classes="muted" VerticalAlignment="Center" Text="Стратегия прошла проверку"
+                           IsVisible="{Binding IsValid}" />
+                <ScrollViewer MaxHeight="90" IsVisible="{Binding !IsValid}">
+                  <ItemsControl ItemsSource="{Binding Errors}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="sys:String">
+                        <TextBlock Text="{Binding}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap" Margin="0,0,0,4" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+          <ScrollViewer>
+            <StackPanel Spacing="14" Margin="0,0,0,28">
+              <Border Classes="card" IsVisible="{Binding Notice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <TextBlock Text="{Binding Notice}" Classes="muted" />
+              </Border>
+
+              <Border Classes="card">
+                <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" IsEnabled="{Binding !IsReadOnly}">
+                  <TextBlock Grid.ColumnSpan="3" Text="Название" Classes="muted" />
+                  <TextBox Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding Name}" Margin="0,4,0,12" />
+                  <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Text="Описание" Classes="muted" />
+                  <TextBox Grid.Row="3" Grid.ColumnSpan="3" Text="{Binding Description}" Margin="0,4,0,12" AcceptsReturn="True" TextWrapping="Wrap" />
+                  <StackPanel Grid.Row="4" Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Перехват TCP (порты)" Classes="muted" />
+                    <TextBox Text="{Binding Tcp}" Watermark="80,443" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="4" Grid.Column="2" Spacing="4">
+                    <TextBlock Text="Перехват UDP (порты)" Classes="muted" />
+                    <TextBox Text="{Binding Udp}" Watermark="443" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+
+              <ItemsControl ItemsSource="{Binding Profiles}" IsEnabled="{Binding !IsReadOnly}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ProfileEditorViewModel">
+                    <Border Classes="card" Margin="0,0,0,14">
+                      <StackPanel Spacing="10">
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Content="Убрать профиль"
+                                  Command="{Binding Owner.RemoveProfileCommand}" CommandParameter="{Binding}" />
+                          <TextBlock Text="Профиль" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <TextBlock Text="Списки доменов" Classes="muted" />
+                        <ItemsControl ItemsSource="{Binding HostToggles}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ListToggle">
+                              <CheckBox Content="{Binding Title}" IsChecked="{Binding IsChecked}" Margin="0,0,18,0" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <CheckBox IsChecked="{Binding AutoHostlist}"
+                                  Content="Автосписок: движок сам добавляет домены, соединения с которыми обрываются как при блокировке" />
+                        <TextBlock Text="Списки IP — только для трафика без имени сайта (игры, звонки)" Classes="muted" />
+                        <ItemsControl ItemsSource="{Binding IpToggles}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ListToggle">
+                              <CheckBox Content="{Binding Title}" IsChecked="{Binding IsChecked}" Margin="0,0,18,0" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding ScopeHint}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap"
+                                   IsVisible="{Binding ScopeHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <TextBlock Text="Опции движка, по одной на строку, без «--»" Classes="muted" />
+                        <TextBox Text="{Binding ArgsText}" AcceptsReturn="True" MinHeight="110"
+                                 FontFamily="Cascadia Mono,Consolas,monospace" FontSize="13" />
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Content="Добавить" Command="{Binding AddOptionCommand}" Margin="8,0,0,0" />
+                          <AutoCompleteBox ItemsSource="{x:Static vm:ProfileEditorViewModel.OptionNames}"
+                                           Text="{Binding SelectedOption}" FilterMode="Contains"
+                                           Watermark="Найти опцию: fooling, split, ttl…" MinimumPrefixLength="0" />
+                        </DockPanel>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <Button Content="+ Профиль" Command="{Binding AddProfileCommand}" IsVisible="{Binding !IsReadOnly}" />
+
+            </StackPanel>
+          </ScrollViewer>
+          </DockPanel>
+        </Grid>
+      </TabItem>
+
+      <!-- Поиск -->
+      <TabItem Header="Поиск">
+        <ScrollViewer Padding="28" DataContext="{Binding Search}" x:DataType="vm:SearchViewModel">
+          <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Stretch">
+            <TextBlock Classes="h1" Text="Поиск стратегии" />
+
+            <Border Classes="card" IsVisible="{Binding !IsWindows}">
+              <TextBlock Classes="muted" Text="Поиск запускает движок, поэтому работает только под Windows." />
+            </Border>
+
+            <Border Classes="card">
+              <Grid ColumnDefinitions="*,20,200">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="muted" Text="Сайты для проверки, по одному на строку" />
+                  <TextBox Text="{Binding TargetsText}" AcceptsReturn="True" Height="96" IsEnabled="{Binding !IsSearching}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="6">
+                  <TextBlock Classes="muted" Text="Лимит времени" />
+                  <ComboBox ItemsSource="{Binding Budgets}" SelectedItem="{Binding BudgetMinutes}"
+                            IsEnabled="{Binding !IsSearching}" HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="sys:Int32">
+                        <TextBlock Text="{Binding StringFormat='{}{0} мин'}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+                    <Button Classes="primary" Content="Искать" Command="{Binding StartCommand}" />
+                    <Button Classes="danger" Content="Стоп" Command="{Binding CancelCommand}" />
+                  </StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <TextBlock Classes="muted" TextWrapping="Wrap"
+                       Text="Сначала сайты проверяются без обхода. Затем перебираются техники обхода, у лучших подбираются параметры, а победитель проверяется ещё дважды. Основной обход на время поиска выключается." />
+
+            <Border Classes="card" IsVisible="{Binding Phase, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+              <StackPanel Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <ProgressBar IsIndeterminate="True" Width="80" IsVisible="{Binding IsSearching}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Phase}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                </StackPanel>
+                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" IsVisible="{Binding Summary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <DockPanel IsVisible="{Binding Best, Converter={x:Static ObjectConverters.IsNotNull}}">
+                  <Button DockPanel.Dock="Right" Classes="primary" Content="Сохранить стратегию" Command="{Binding SaveResultCommand}" Margin="10,0,0,0" />
+                  <TextBox Text="{Binding ResultName}" />
+                </DockPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" IsVisible="{Binding Tested.Count}">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="muted" Text="Проверенные варианты" />
+                <ItemsControl ItemsSource="{Binding Tested}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ScoreRow">
+                      <Grid ColumnDefinitions="*,120,80" Margin="0,3">
+                        <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="1" Text="{Binding Result}" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="2" Text="{Binding Latency}" Classes="muted" HorizontalAlignment="Right" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- Настройки -->
+      <TabItem Header="Настройки">
+        <ScrollViewer Padding="28">
+          <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Stretch">
+            <TextBlock Classes="h1" Text="Настройки" />
+            <Border Classes="card">
+              <StackPanel Spacing="10">
+                <ToggleSwitch IsChecked="{Binding CommunityEnabled}" OnContent="Обмен с сообществом включён"
+                              OffContent="Обмен с сообществом выключен" />
+                <TextBlock Classes="muted" Text="Включено: приложение может брать стратегии из общей базы, а стратегии, найденные поиском, отправляются в неё." />
+                <TextBlock Classes="muted" Text="Отправляется: номер сети провайдера (ASN), регион (субъект), параметры стратегии и результат проверки. Только если поиск шёл по стандартному набору сайтов." />
+                <TextBlock Classes="muted" Text="Не отправляется никогда: ваши списки сайтов, свой набор сайтов для поиска, журналы, история соединений. Сервер при этом видит ваш IP-адрес, как любой сайт, к которому вы подключаетесь." />
+                <TextBlock Classes="muted" FontStyle="Italic" Text="Сервер базы ещё не запущен: переключатель сохраняется, но обмен пока не происходит." />
+              </StackPanel>
+            </Border>
+            <Border Classes="card" DataContext="{Binding Blocklists}" x:DataType="vm:BlocklistsViewModel">
+              <StackPanel Spacing="10">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10">
+                    <ProgressBar IsIndeterminate="True" Width="60" IsVisible="{Binding IsUpdating}" VerticalAlignment="Center" />
+                    <Button Content="Обновить сейчас" Command="{Binding UpdateNowCommand}" />
+                  </StackPanel>
+                  <TextBlock Text="Списки блокировок" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </DockPanel>
+                <ItemsControl ItemsSource="{Binding Items}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SubscriptionStatus">
+                      <StackPanel Margin="0,4" Spacing="2">
+                        <DockPanel>
+                          <TextBlock DockPanel.Dock="Right" Text="{Binding Info}" Classes="muted" />
+                          <TextBlock Text="{Binding Title}" />
+                        </DockPanel>
+                        <TextBlock Text="{Binding Error}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap"
+                                   IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Classes="muted" Text="Обновляются при запуске приложения, если старше суток, или кнопкой. Движок подхватывает новые списки сам, без перезапуска. Источники: Re:filter и antifilter community. Из списка IP выброшены подсети больше 65 536 адресов (в исходных данных там Cloudflare и Google) и служебные адреса. Если загрузка выглядит обрезанной, остаётся прежний список." />
+                <DockPanel Margin="0,6,0,0">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Пересчитать" Command="{Binding RefreshAutoCommand}" />
+                    <Button Content="Очистить" Command="{Binding ClearAutoCommand}" />
+                  </StackPanel>
+                  <TextBlock Text="{Binding AutoInfo}" VerticalAlignment="Center" />
+                </DockPanel>
+                <TextBlock Classes="muted" Text="Автосписок ведёт сам движок. Если туда попал рабочий сайт и обход его ломает, впишите домен в exclude.txt — туда он больше не попадёт." />
+              </StackPanel>
+            </Border>
+            <Border Classes="card">
+              <StackPanel Spacing="10">
+                <TextBlock Text="Свои списки" FontWeight="SemiBold" />
+                <TextBlock Classes="muted" Text="Файлы .txt, по домену на строку, поддомены подхватываются автоматически. general.txt и новые файлы — ваши. blocked.txt перезаписывается при обновлении. exclude.txt — домены, которые обход не трогает." />
+                <TextBlock Classes="muted" Text="{Binding ListStore.Directory}" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" />
+                <Button Content="Открыть папку" Command="{Binding OpenListsFolderCommand}" IsEnabled="{Binding IsWindows}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+    </TabControl>
+  </Grid>
+</Window>

@@ -1,0 +1,39 @@
+{
+  "id": "general-multidisorder",
+  "name": "Общая: fake + multidisorder",
+  "description": "Вариант для провайдеров, где multisplit не проходит: сегменты уходят в обратном порядке, фейк с badseq. Списки те же: general, blocked и автосписок.",
+  "intercept": {
+    "tcp": "80,443",
+    "udp": "443"
+  },
+  "profiles": [
+    {
+      "hostlists": [
+        "general",
+        "blocked"
+      ],
+      "args": [
+        "filter-udp=443",
+        "dpi-desync=fake",
+        "dpi-desync-repeats=6",
+        "dpi-desync-fake-quic=quic_initial_www_google_com.bin"
+      ]
+    },
+    {
+      "hostlists": [
+        "general",
+        "blocked"
+      ],
+      "autoHostlist": true,
+      "args": [
+        "filter-tcp=80,443",
+        "dpi-desync=fake,multidisorder",
+        "dpi-desync-split-pos=1,midsld",
+        "dpi-desync-repeats=6",
+        "dpi-desync-fooling=badseq",
+        "dpi-desync-fake-tls=!",
+        "dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com"
+      ]
+    }
+  ]
+}

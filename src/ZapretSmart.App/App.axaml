@@ -1,0 +1,81 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ZapretSmart.App.App"
+             RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <SolidColorBrush x:Key="ZsBackground" Color="#0F1115" />
+    <SolidColorBrush x:Key="ZsSurface" Color="#171A21" />
+    <SolidColorBrush x:Key="ZsSurfaceRaised" Color="#1F232C" />
+    <SolidColorBrush x:Key="ZsBorder" Color="#2A2F3A" />
+    <SolidColorBrush x:Key="ZsText" Color="#E6E8EE" />
+    <SolidColorBrush x:Key="ZsTextMuted" Color="#8A90A0" />
+    <SolidColorBrush x:Key="ZsAccent" Color="#3DD6B5" />
+    <SolidColorBrush x:Key="ZsAccentText" Color="#062A22" />
+    <SolidColorBrush x:Key="ZsDanger" Color="#FF6B6B" />
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Dark" Accent="#3DD6B5" RegionColor="#0F1115" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+
+    <Style Selector="TextBlock.h1">
+      <Setter Property="FontSize" Value="26" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource ZsText}" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{StaticResource ZsTextMuted}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{StaticResource ZsSurface}" />
+      <Setter Property="BorderBrush" Value="{StaticResource ZsBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="20" />
+    </Style>
+
+    <Style Selector="TabControl.nav">
+      <Setter Property="TabStripPlacement" Value="Left" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="TabControl.nav /template/ ItemsPresenter#PART_ItemsPresenter">
+      <Setter Property="Margin" Value="12,72,12,12" />
+    </Style>
+    <Style Selector="TabControl.nav TabItem">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="Width" Value="176" />
+      <Setter Property="Padding" Value="14,0" />
+      <Setter Property="Margin" Value="0,2" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Foreground" Value="{StaticResource ZsTextMuted}" />
+    </Style>
+    <Style Selector="TabControl.nav TabItem:selected">
+      <Setter Property="Background" Value="{StaticResource ZsSurfaceRaised}" />
+      <Setter Property="Foreground" Value="{StaticResource ZsText}" />
+    </Style>
+    <Style Selector="TabControl.nav TabItem:selected /template/ Border#PART_SelectedPipe">
+      <Setter Property="Background" Value="{StaticResource ZsAccent}" />
+    </Style>
+
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="{StaticResource ZsAccent}" />
+      <Setter Property="Foreground" Value="{StaticResource ZsAccentText}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="28,12" />
+    </Style>
+    <Style Selector="Button.danger">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{StaticResource ZsDanger}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{StaticResource ZsDanger}" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="28,12" />
+    </Style>
+  </Application.Styles>
+</Application>
