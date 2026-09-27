@@ -10,13 +10,28 @@ using ZapretSmart.Core.Strategies;
 
 namespace ZapretSmart.App.ViewModels;
 
-public sealed record ScoreRow(string Label, string Result, string Latency, bool IsFull)
+public sealed record ScoreRow(string Label, string Result, string Latency, bool IsFull, bool IsFailed = false)
 {
+    public bool IsZero => !IsFull && !IsFailed && Latency.Length == 0;
+
     public static ScoreRow From(CandidateScore s) => new(
         s.Candidate.Label,
         s.Error is not null ? "движок не запустился" : $"{s.Passed}/{s.Total}",
         s.Passed > 0 ? $"{s.MedianLatency.TotalMilliseconds:0} мс" : "",
-        s.IsFull);
+        s.IsFull,
+        s.Error is not null);
+}
+
+/// <summary>Шаг поиска. Пока поиск не запущен, шаги объясняют, что он будет делать; во время поиска показывают, где он сейчас.</summary>
+public sealed partial class SearchStep(int number, string title, string hint, bool isLast) : ObservableObject
+{
+    public int Number { get; } = number;
+    public string Title { get; } = title;
+    public string Hint { get; } = hint;
+    public bool IsLast { get; } = isLast;
+
+    [ObservableProperty] private bool _isActive;
+    [ObservableProperty] private bool _isDone;
 }
 
 public sealed partial class SearchViewModel : ObservableObject, IDisposable
@@ -37,6 +52,25 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     }
 
     public IReadOnlyList<int> Budgets { get; } = [3, 6, 10, 20];
+
+    public IReadOnlyList<SearchStep> Steps { get; } =
+    [
+        new(1, "Без обхода", "Какие из сайтов на самом деле заблокированы", false),
+        new(2, "Перебор", "Два десятка техник обхода по очереди", false),
+        new(3, "Доводка", "Подбор параметров для двух лучших", false),
+        new(4, "Проверка", "Победитель проверяется ещё дважды", true),
+    ];
+
+    /// <summary>0 — поиск не идёт и не завершён; 1..4 — текущий шаг; 5 — все шаги пройдены.</summary>
+    public void SetStep(int current)
+    {
+        foreach (var step in Steps)
+        {
+            step.IsDone = step.Number < current;
+            step.IsActive = step.Number == current;
+        }
+    }
+
     public ObservableCollection<ScoreRow> Tested { get; } = [];
 
     public bool IsWindows => OperatingSystem.IsWindows();
@@ -78,6 +112,7 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
 
         IsSearching = true;
         _main.IsSearching = true;
+        SetStep(0);
         HasResult = false;
         Best = null;
         Tested.Clear();
@@ -109,20 +144,24 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
+            SetStep(0);
             Phase = "Поиск отменён";
         }
         catch (SearchAbortedException e)
         {
+            SetStep(0);
             Phase = "Поиск прерван";
             Summary = e.Message + ". Запущено ли приложение от имени администратора? Не мешает ли антивирус?";
         }
         catch (FileNotFoundException)
         {
+            SetStep(0);
             Phase = "Поиск прерван";
             Summary = "Не найден движок: " + _main.Paths.EngineExe;
         }
         catch (Exception e) when (e is StrategyRejectedException or IOException or UnauthorizedAccessException)
         {
+            SetStep(0);
             Phase = "Поиск прерван";
             Summary = e.Message;
         }
@@ -173,6 +212,15 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
 
     private void OnProgress(SearchProgress p)
     {
+        SetStep(p.Phase switch
+        {
+            SearchPhase.Baseline => 1,
+            SearchPhase.Explore => 2,
+            SearchPhase.Refine => 3,
+            SearchPhase.Verify => 4,
+            SearchPhase.Done => Steps.Count + 1,
+            _ => Steps.FirstOrDefault(s => s.IsActive)?.Number ?? 0,
+        });
         Phase = p.Phase switch
         {
             SearchPhase.Baseline => "Проверка без обхода",
@@ -187,6 +235,7 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     public void ApplyResult(SearchResult r, IReadOnlyList<string> targets)
     {
         HasResult = true;
+        SetStep(Steps.Count + 1);
         Best = r.Best;
         _blocked = r.Blocked;
         var lines = new List<string>();

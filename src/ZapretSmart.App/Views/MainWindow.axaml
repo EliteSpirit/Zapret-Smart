@@ -1,347 +1,608 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:sys="using:System"
+        xmlns:app="using:ZapretSmart.App"
+        xmlns:c="using:ZapretSmart.App.Controls"
         xmlns:vm="using:ZapretSmart.App.ViewModels"
         x:Class="ZapretSmart.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Zapret Smart"
         Icon="/Assets/app.png"
         Width="1100" Height="720" MinWidth="900" MinHeight="560"
-        Background="{StaticResource ZsBackground}">
+        Background="{DynamicResource ZsBackground}"
+        FontFamily="{DynamicResource ZsFont}">
 
-  <Grid>
-    <Border Width="200" HorizontalAlignment="Left" Background="{StaticResource ZsSurface}"
-            BorderBrush="{StaticResource ZsBorder}" BorderThickness="0,0,1,0" />
-    <StackPanel Margin="24,22,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="2" IsHitTestVisible="False">
-      <TextBlock Text="Zapret" FontSize="20" FontWeight="Bold" Foreground="{StaticResource ZsText}" />
-      <TextBlock Text="SMART" FontSize="11" FontWeight="SemiBold" LetterSpacing="3" Foreground="{StaticResource ZsAccent}" />
-    </StackPanel>
+  <!-- Frame снимается целиком при смене темы: снимок гаснет поверх новой темы (OverlayHost). -->
+  <Panel x:Name="Frame">
+    <c:BackdropView x:Name="Backdrop" Animated="{Binding AnimatedBackdrop}" />
 
-    <TabControl Classes="nav" x:Name="Tabs">
+    <Grid>
+      <Border Width="200" HorizontalAlignment="Left" Background="{DynamicResource ZsSidebar}"
+              BorderBrush="{DynamicResource ZsBorder}" BorderThickness="0,0,1,0" />
+      <StackPanel Margin="24,22,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="2" IsHitTestVisible="False">
+        <TextBlock Text="Zapret" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource ZsText}" />
+        <TextBlock Text="SMART" FontSize="11" FontWeight="SemiBold" LetterSpacing="3" Foreground="{DynamicResource ZsAccent}" />
+      </StackPanel>
 
-      <!-- Обход -->
-      <TabItem Header="Обход">
-        <ScrollViewer Padding="28">
-          <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Stretch">
-            <StackPanel Spacing="6">
-              <StackPanel Orientation="Horizontal" Spacing="14">
-                <Panel Width="14" Height="14" VerticalAlignment="Center">
-                  <Ellipse Classes="pulse" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsSwitching}" />
-                  <Ellipse Classes="dot" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsSwitching}" />
-                </Panel>
-                <TextBlock Classes="h1" Text="{Binding StatusText}" />
-              </StackPanel>
-              <TextBlock Classes="muted" Text="{Binding WatchdogStatus}" Margin="28,0,0,0"
-                         IsVisible="{Binding WatchdogStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+      <TabControl Classes="nav" x:Name="Tabs">
+
+        <!-- ═══ Обход ═══ -->
+        <TabItem AutomationProperties.Name="Обход">
+          <TabItem.Header>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Path Classes="icon" Stroke="{Binding $parent[TabItem].Foreground}"
+                    Data="M4.8,5 A6.5,6.5 0 1 0 13.2,5 M9,2.5 L9,9" />
+              <TextBlock Text="Обход" VerticalAlignment="Center" />
             </StackPanel>
-
-            <Border Classes="card">
-              <StackPanel Spacing="14">
-                <TextBlock Text="Стратегия" Classes="muted" />
-                <ComboBox ItemsSource="{Binding Strategies}" SelectedItem="{Binding SelectedStrategy}"
-                          IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Stretch">
-                  <ComboBox.ItemTemplate>
-                    <DataTemplate x:DataType="vm:StrategyItem">
-                      <TextBlock Text="{Binding Name}" />
-                    </DataTemplate>
-                  </ComboBox.ItemTemplate>
-                </ComboBox>
-                <TextBlock Text="{Binding SelectedStrategy.Description, FallbackValue=''}" Classes="muted" />
-                <StackPanel Orientation="Horizontal" Spacing="12">
-                  <Button Classes="primary" Content="Включить" Command="{Binding StartCommand}" />
-                  <Button Classes="danger" Content="Выключить" Command="{Binding StopCommand}" />
+          </TabItem.Header>
+          <ScrollViewer Padding="28">
+            <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="6">
+                <StackPanel Orientation="Horizontal" Spacing="14">
+                  <Panel Width="14" Height="14" VerticalAlignment="Center">
+                    <Ellipse Classes="pulse" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsSwitching}" />
+                    <Ellipse Classes="dot" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsSwitching}" />
+                  </Panel>
+                  <TextBlock Classes="h1" Text="{Binding StatusText}" />
                 </StackPanel>
+                <TextBlock Classes="muted reveal" Text="{Binding WatchdogStatus}" Margin="28,0,0,0"
+                           IsVisible="{Binding WatchdogStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
               </StackPanel>
-            </Border>
 
-            <Border Classes="card">
-              <DockPanel>
-                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                  <Button DockPanel.Dock="Right" Content="Очистить" Command="{Binding ClearLogCommand}" />
-                  <TextBlock Text="Журнал движка" Classes="muted" VerticalAlignment="Center" />
-                </DockPanel>
-                <ListBox ItemsSource="{Binding Log}" Height="240" Background="Transparent"
-                         FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" />
-              </DockPanel>
-            </Border>
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
-
-      <!-- Стратегии: список + конструктор -->
-      <TabItem Header="Стратегии">
-        <Grid ColumnDefinitions="260,*" Margin="28,28,28,0" DataContext="{Binding Editor}" x:DataType="vm:StrategyEditorViewModel">
-          <DockPanel Grid.Column="0" Margin="0,0,20,20">
-            <TextBlock DockPanel.Dock="Top" Classes="h1" Text="Стратегии" Margin="0,0,0,14" />
-            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
-              <Button Content="Новая" Command="{Binding NewCommand}" />
-              <Button Content="Копия" Command="{Binding CopyCommand}" />
-              <Button Content="Удалить" Command="{Binding DeleteCommand}" />
-            </StackPanel>
-            <ItemsControl DockPanel.Dock="Bottom" ItemsSource="{Binding LoadErrors}" Margin="0,10,0,0">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="sys:String">
-                  <TextBlock Text="{Binding}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,4" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            <ListBox ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem}" Background="Transparent">
-              <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="vm:StrategyItem">
-                  <StackPanel Spacing="2" Margin="0,4">
-                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding Origin}" Classes="muted" FontSize="12" />
-                  </StackPanel>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-          </DockPanel>
-
-          <DockPanel Grid.Column="1">
-            <Border DockPanel.Dock="Bottom" Classes="card" Margin="0,12,0,20" Padding="16,12">
-              <DockPanel>
-                <Button DockPanel.Dock="Right" Classes="primary" Content="Сохранить" Command="{Binding SaveCommand}"
-                        VerticalAlignment="Top" Margin="12,0,0,0" />
-                <TextBlock Classes="muted" VerticalAlignment="Center" Text="Стратегия прошла проверку"
-                           IsVisible="{Binding IsValid}" />
-                <ScrollViewer MaxHeight="90" IsVisible="{Binding !IsValid}">
-                  <ItemsControl ItemsSource="{Binding Errors}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate x:DataType="sys:String">
-                        <TextBlock Text="{Binding}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap" Margin="0,0,0,4" />
+              <Border Classes="card">
+                <StackPanel Spacing="14">
+                  <TextBlock Text="Стратегия" Classes="caption" />
+                  <ComboBox ItemsSource="{Binding Strategies}" SelectedItem="{Binding SelectedStrategy}"
+                            IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:StrategyItem">
+                        <TextBlock Text="{Binding Name}" />
                       </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </ScrollViewer>
-              </DockPanel>
-            </Border>
-          <ScrollViewer>
-            <StackPanel Spacing="14" Margin="0,0,0,28">
-              <Border Classes="card" IsVisible="{Binding Notice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                <TextBlock Text="{Binding Notice}" Classes="muted" />
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <TextBlock Text="{Binding SelectedStrategy.Description, FallbackValue=''}" Classes="muted" />
+                  <DockPanel Margin="0,4,0,0">
+                    <Grid DockPanel.Dock="Left">
+                      <Button x:Name="StartButton" Classes="primary swap" Classes.hidden="{Binding ShowStop}"
+                              Content="Включить" Command="{Binding StartCommand}" />
+                      <Button x:Name="StopButton" Classes="danger swap" Classes.hidden="{Binding !ShowStop}"
+                              Content="Выключить" Command="{Binding StopCommand}" />
+                    </Grid>
+                    <TextBlock Classes="caption reveal" VerticalAlignment="Center" Margin="16,0,0,0"
+                               Text="Сменить стратегию можно после выключения обхода."
+                               IsVisible="{Binding IsRunning}" />
+                  </DockPanel>
+                </StackPanel>
               </Border>
 
               <Border Classes="card">
-                <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" IsEnabled="{Binding !IsReadOnly}">
-                  <TextBlock Grid.ColumnSpan="3" Text="Название" Classes="muted" />
-                  <TextBox Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding Name}" Margin="0,4,0,12" />
-                  <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Text="Описание" Classes="muted" />
-                  <TextBox Grid.Row="3" Grid.ColumnSpan="3" Text="{Binding Description}" Margin="0,4,0,12" AcceptsReturn="True" TextWrapping="Wrap" />
-                  <StackPanel Grid.Row="4" Grid.Column="0" Spacing="4">
-                    <TextBlock Text="Перехват TCP (порты)" Classes="muted" />
-                    <TextBox Text="{Binding Tcp}" Watermark="80,443" />
+                <DockPanel>
+                  <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                      <Button x:Name="CopyLogButton" Classes="small subtle" Content="Скопировать" Click="OnCopyLog"
+                              IsEnabled="{Binding Log.Count, Converter={x:Static app:Converters.IsPositive}}" />
+                      <Button Classes="small subtle" Content="Очистить" Command="{Binding ClearLogCommand}"
+                              IsEnabled="{Binding Log.Count, Converter={x:Static app:Converters.IsPositive}}" />
+                    </StackPanel>
+                    <TextBlock Text="Журнал движка" Classes="title" VerticalAlignment="Center" />
+                  </DockPanel>
+                  <Panel Height="260">
+                    <ScrollViewer x:Name="LogScroll" HorizontalScrollBarVisibility="Disabled">
+                      <ItemsControl x:Name="LogItems" ItemsSource="{Binding Log}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="sys:String">
+                            <TextBlock Classes="log" Text="{Binding}"
+                                       Classes.warn="{Binding Converter={x:Static app:Converters.IsWarningLine}}"
+                                       Classes.cmd="{Binding Converter={x:Static app:Converters.IsCommandLine}}" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </ScrollViewer>
+                    <TextBlock Classes="caption" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Text="Здесь появится вывод движка"
+                               IsVisible="{Binding Log.Count, Converter={x:Static app:Converters.IsZero}}" />
+                  </Panel>
+                </DockPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ═══ Стратегии: список + просмотр или конструктор ═══ -->
+        <TabItem AutomationProperties.Name="Стратегии">
+          <TabItem.Header>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Path Classes="icon" Stroke="{Binding $parent[TabItem].Foreground}"
+                    Data="M7,5 L15.5,5 M7,9.5 L15.5,9.5 M7,14 L15.5,14 M3,5 L3.01,5 M3,9.5 L3.01,9.5 M3,14 L3.01,14" />
+              <TextBlock Text="Стратегии" VerticalAlignment="Center" />
+            </StackPanel>
+          </TabItem.Header>
+          <Grid ColumnDefinitions="260,*" Margin="28,28,28,0" DataContext="{Binding Editor}" x:DataType="vm:StrategyEditorViewModel">
+            <DockPanel Grid.Column="0" Margin="0,0,20,20">
+              <TextBlock DockPanel.Dock="Top" Classes="h1" Text="Стратегии" Margin="0,0,0,14" />
+              <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,12,0,0">
+                <Button Classes="small" Content="Новая" Command="{Binding NewCommand}" />
+                <Button Classes="small" Content="Копия" Command="{Binding CopyCommand}" />
+                <Button x:Name="DeleteButton" Classes="small" Content="Удалить" IsEnabled="{Binding CanDeleteSelected}">
+                  <Button.Flyout>
+                    <Flyout Placement="TopEdgeAlignedLeft">
+                      <StackPanel Spacing="8" MaxWidth="260">
+                        <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}"
+                                   Text="{Binding Name, StringFormat='Удалить «{0}»?'}" />
+                        <TextBlock Classes="caption" Text="Файл стратегии будет стёрт, вернуть его не получится." />
+                        <Button Classes="danger small" Content="Удалить" Margin="0,4,0,0" Click="OnDeleteConfirmed" />
+                      </StackPanel>
+                    </Flyout>
+                  </Button.Flyout>
+                </Button>
+              </StackPanel>
+              <ItemsControl DockPanel.Dock="Bottom" ItemsSource="{Binding LoadErrors}" Margin="0,10,0,0">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="sys:String">
+                    <TextBlock Classes="error" Text="{Binding}" FontSize="12" Margin="0,0,0,4" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ListBox Classes="picker" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:StrategyItem">
+                    <DockPanel>
+                      <Border Classes="pipe" DockPanel.Dock="Left" Width="3" Height="22" CornerRadius="1.5"
+                              Margin="-7,0,9,0" VerticalAlignment="Center" />
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Origin}" Classes="caption" />
+                      </StackPanel>
+                    </DockPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
+
+            <DockPanel Grid.Column="1">
+              <!-- Строка сохранения: только у своих стратегий. -->
+              <Border DockPanel.Dock="Bottom" Classes="card" Margin="0,12,0,20" Padding="16,12" IsVisible="{Binding !IsReadOnly}">
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Classes="primary small" Content="Сохранить" Command="{Binding SaveCommand}"
+                          VerticalAlignment="Top" Margin="12,0,0,0" />
+                  <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" IsVisible="{Binding IsValid}">
+                    <Ellipse Classes="dot" Width="8" Height="8" Classes.saved="{Binding IsSaved}" Classes.pending="{Binding !IsSaved}"
+                             VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding SaveStatus}" Foreground="{DynamicResource ZsText}" VerticalAlignment="Center" />
                   </StackPanel>
-                  <StackPanel Grid.Row="4" Grid.Column="2" Spacing="4">
-                    <TextBlock Text="Перехват UDP (порты)" Classes="muted" />
-                    <TextBox Text="{Binding Udp}" Watermark="443" />
+                  <ScrollViewer MaxHeight="90" IsVisible="{Binding !IsValid}">
+                    <ItemsControl Classes="reveal" ItemsSource="{Binding Errors}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="sys:String">
+                          <TextBlock Classes="error" Text="{Binding}" Margin="0,0,0,4" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+
+              <ScrollViewer x:Name="EditorScroll">
+                <StackPanel Spacing="14" Margin="0,0,0,28">
+
+                  <!-- Просмотр встроенной стратегии: читается как описание, а не как форма с серыми полями. -->
+                  <StackPanel Spacing="14" IsVisible="{Binding IsReadOnly}" Classes="reveal">
+                    <Border Classes="card" Padding="16,12">
+                      <DockPanel>
+                        <Button DockPanel.Dock="Right" Classes="primary small" Content="Сделать копию" Command="{Binding CopyCommand}"
+                                VerticalAlignment="Center" Margin="12,0,0,0" />
+                        <TextBlock Classes="muted" VerticalAlignment="Center"
+                                   Text="Встроенную стратегию менять нельзя. Сделайте копию и правьте её." />
+                      </DockPanel>
+                    </Border>
+                    <Border Classes="card">
+                      <StackPanel Spacing="10">
+                        <TextBlock Classes="h2" Text="{Binding Name}" />
+                        <TextBlock Classes="muted" Text="{Binding Description}"
+                                   IsVisible="{Binding Description, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <WrapPanel Margin="0,4,0,0">
+                          <Border Classes="chip" IsVisible="{Binding Tcp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                            <TextBlock Text="{Binding Tcp, StringFormat='TCP {0}'}" />
+                          </Border>
+                          <Border Classes="chip" IsVisible="{Binding Udp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                            <TextBlock Text="{Binding Udp, StringFormat='UDP {0}'}" />
+                          </Border>
+                        </WrapPanel>
+                      </StackPanel>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding Profiles}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ProfileEditorViewModel">
+                          <Border Classes="card" Margin="0,0,0,14">
+                            <StackPanel Spacing="12">
+                              <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock Classes="title" Text="{Binding Number, StringFormat='Профиль {0}'}" />
+                                <TextBlock Classes="caption" Text="{Binding FilterSummary}" VerticalAlignment="Center" />
+                              </StackPanel>
+                              <ItemsControl ItemsSource="{Binding Chips}">
+                                <ItemsControl.ItemsPanel>
+                                  <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate x:DataType="vm:ProfileChip">
+                                    <Border Classes="chip" Classes.accent="{Binding IsAccent}">
+                                      <TextBlock Text="{Binding Text}" />
+                                    </Border>
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                              <Border Classes="code">
+                                <SelectableTextBlock Text="{Binding ArgsText}" FontFamily="{DynamicResource ZsMonoFont}" FontSize="13"
+                                                     TextWrapping="Wrap" Foreground="{DynamicResource ZsText}" />
+                              </Border>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+
+                  <!-- Конструктор своей стратегии. -->
+                  <StackPanel Spacing="14" IsVisible="{Binding !IsReadOnly}" Classes="reveal">
+                    <Border Classes="card">
+                      <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                        <TextBlock Grid.ColumnSpan="3" Text="Название" Classes="caption" />
+                        <TextBox Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding Name}" Margin="0,6,0,14" />
+                        <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Text="Описание" Classes="caption" />
+                        <TextBox Grid.Row="3" Grid.ColumnSpan="3" Text="{Binding Description}" Margin="0,6,0,14"
+                                 AcceptsReturn="True" TextWrapping="Wrap" Watermark="Для чего она и на каких сайтах проверена" />
+                        <StackPanel Grid.Row="4" Grid.Column="0" Spacing="6">
+                          <TextBlock Text="Перехват TCP (порты)" Classes="caption" />
+                          <TextBox Text="{Binding Tcp}" Watermark="80,443" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="4" Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Перехват UDP (порты)" Classes="caption" />
+                          <TextBox Text="{Binding Udp}" Watermark="443" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding Profiles}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ProfileEditorViewModel">
+                          <Border Classes="card" Margin="0,0,0,14">
+                            <StackPanel Spacing="10">
+                              <DockPanel>
+                                <Button DockPanel.Dock="Right" Classes="small subtle" Content="Убрать"
+                                        Command="{Binding Owner.RemoveProfileCommand}" CommandParameter="{Binding}" />
+                                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                  <TextBlock Classes="title" Text="{Binding Number, StringFormat='Профиль {0}'}" />
+                                  <TextBlock Classes="caption" Text="{Binding FilterSummary}" VerticalAlignment="Center" />
+                                </StackPanel>
+                              </DockPanel>
+                              <TextBlock Text="Списки доменов" Classes="caption" />
+                              <ItemsControl ItemsSource="{Binding HostToggles}">
+                                <ItemsControl.ItemsPanel>
+                                  <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate x:DataType="vm:ListToggle">
+                                    <CheckBox Content="{Binding Title}" IsChecked="{Binding IsChecked}" Margin="0,0,18,0" />
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                              <CheckBox IsChecked="{Binding AutoHostlist}"
+                                        Content="Автосписок: движок сам добавляет домены, соединения с которыми обрываются как при блокировке" />
+                              <TextBlock Text="Списки IP: только для трафика без имени сайта (игры, звонки)" Classes="caption" />
+                              <ItemsControl ItemsSource="{Binding IpToggles}">
+                                <ItemsControl.ItemsPanel>
+                                  <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate x:DataType="vm:ListToggle">
+                                    <CheckBox Content="{Binding Title}" IsChecked="{Binding IsChecked}" Margin="0,0,18,0" />
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                              <TextBlock Classes="error reveal" Text="{Binding ScopeHint}"
+                                         IsVisible="{Binding ScopeHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                              <TextBlock Text="Опции движка, по одной на строку, без «--»" Classes="caption" Margin="0,4,0,0" />
+                              <TextBox Text="{Binding ArgsText}" AcceptsReturn="True" MinHeight="110"
+                                       FontFamily="{DynamicResource ZsMonoFont}" FontSize="13" />
+                              <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="Добавить" Command="{Binding AddOptionCommand}" Margin="8,0,0,0" />
+                                <AutoCompleteBox ItemsSource="{x:Static vm:ProfileEditorViewModel.OptionNames}"
+                                                 Text="{Binding SelectedOption}" FilterMode="Contains"
+                                                 Watermark="Найти опцию: fooling, split, ttl…" MinimumPrefixLength="0" />
+                              </DockPanel>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Button Classes="small" Content="Добавить профиль" Command="{Binding AddProfileCommand}" HorizontalAlignment="Left" />
+                  </StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+            </DockPanel>
+          </Grid>
+        </TabItem>
+
+        <!-- ═══ Поиск ═══ -->
+        <TabItem AutomationProperties.Name="Поиск">
+          <TabItem.Header>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Path Classes="icon" Stroke="{Binding $parent[TabItem].Foreground}"
+                    Data="M13.5,8 A5.5,5.5 0 1 1 2.5,8 A5.5,5.5 0 1 1 13.5,8 Z M12,12 L16,16" />
+              <TextBlock Text="Поиск" VerticalAlignment="Center" />
+            </StackPanel>
+          </TabItem.Header>
+          <ScrollViewer Padding="28" DataContext="{Binding Search}" x:DataType="vm:SearchViewModel">
+            <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Stretch">
+              <TextBlock Classes="h1" Text="Поиск стратегии" />
+
+              <Border Classes="card" IsVisible="{Binding !IsWindows}">
+                <TextBlock Classes="muted" Text="Поиск запускает движок, поэтому работает только под Windows." />
+              </Border>
+
+              <Border Classes="card">
+                <Grid ColumnDefinitions="*,20,200">
+                  <StackPanel Spacing="6">
+                    <TextBlock Classes="caption" Text="Сайты для проверки, по одному на строку" />
+                    <TextBox Text="{Binding TargetsText}" AcceptsReturn="True" Height="104" IsEnabled="{Binding !IsSearching}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Spacing="6">
+                    <TextBlock Classes="caption" Text="Лимит времени" />
+                    <ComboBox ItemsSource="{Binding Budgets}" SelectedItem="{Binding BudgetMinutes}"
+                              IsEnabled="{Binding !IsSearching}" HorizontalAlignment="Stretch">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="sys:Int32">
+                          <TextBlock Text="{Binding StringFormat='{}{0} мин'}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Grid Margin="0,12,0,0">
+                      <Button Classes="primary swap" Classes.hidden="{Binding IsSearching}" HorizontalAlignment="Stretch"
+                              Content="Искать" Command="{Binding StartCommand}" />
+                      <Button Classes="danger swap" Classes.hidden="{Binding !IsSearching}" HorizontalAlignment="Stretch"
+                              Content="Остановить" Command="{Binding CancelCommand}" />
+                    </Grid>
                   </StackPanel>
                 </Grid>
               </Border>
 
-              <ItemsControl ItemsSource="{Binding Profiles}" IsEnabled="{Binding !IsReadOnly}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:ProfileEditorViewModel">
-                    <Border Classes="card" Margin="0,0,0,14">
-                      <StackPanel Spacing="10">
-                        <DockPanel>
-                          <Button DockPanel.Dock="Right" Content="Убрать профиль"
-                                  Command="{Binding Owner.RemoveProfileCommand}" CommandParameter="{Binding}" />
-                          <TextBlock Text="Профиль" FontWeight="SemiBold" VerticalAlignment="Center" />
-                        </DockPanel>
-                        <TextBlock Text="Списки доменов" Classes="muted" />
-                        <ItemsControl ItemsSource="{Binding HostToggles}">
-                          <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                          </ItemsControl.ItemsPanel>
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ListToggle">
-                              <CheckBox Content="{Binding Title}" IsChecked="{Binding IsChecked}" Margin="0,0,18,0" />
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <CheckBox IsChecked="{Binding AutoHostlist}"
-                                  Content="Автосписок: движок сам добавляет домены, соединения с которыми обрываются как при блокировке" />
-                        <TextBlock Text="Списки IP — только для трафика без имени сайта (игры, звонки)" Classes="muted" />
-                        <ItemsControl ItemsSource="{Binding IpToggles}">
-                          <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                          </ItemsControl.ItemsPanel>
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ListToggle">
-                              <CheckBox Content="{Binding Title}" IsChecked="{Binding IsChecked}" Margin="0,0,18,0" />
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <TextBlock Text="{Binding ScopeHint}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap"
-                                   IsVisible="{Binding ScopeHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                        <TextBlock Text="Опции движка, по одной на строку, без «--»" Classes="muted" />
-                        <TextBox Text="{Binding ArgsText}" AcceptsReturn="True" MinHeight="110"
-                                 FontFamily="Cascadia Mono,Consolas,monospace" FontSize="13" />
-                        <DockPanel>
-                          <Button DockPanel.Dock="Right" Content="Добавить" Command="{Binding AddOptionCommand}" Margin="8,0,0,0" />
-                          <AutoCompleteBox ItemsSource="{x:Static vm:ProfileEditorViewModel.OptionNames}"
-                                           Text="{Binding SelectedOption}" FilterMode="Contains"
-                                           Watermark="Найти опцию: fooling, split, ttl…" MinimumPrefixLength="0" />
-                        </DockPanel>
-                      </StackPanel>
-                    </Border>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+              <!-- Шаги: пока поиск не шёл, объясняют план; во время поиска показывают, где он сейчас. -->
+              <Border Classes="card">
+                <StackPanel Spacing="14">
+                  <ItemsControl ItemsSource="{Binding Steps}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><UniformGrid Columns="4" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:SearchStep">
+                        <StackPanel Spacing="8" Margin="0,0,12,0">
+                          <Grid ColumnDefinitions="Auto,*">
+                            <Border Classes="step" Classes.active="{Binding IsActive}" Classes.done="{Binding IsDone}">
+                              <Panel>
+                                <TextBlock Text="{Binding Number}" IsVisible="{Binding !IsDone}" />
+                                <Path Data="M4,9 L7.2,12.2 L13,5.8" Stroke="{DynamicResource ZsAccentText}" StrokeThickness="2"
+                                      StrokeLineCap="Round" StrokeJoin="Round" Width="18" Height="18"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsDone}" />
+                              </Panel>
+                            </Border>
+                            <Border Grid.Column="1" Classes="stepLine" Classes.done="{Binding IsDone}" Margin="8,0,0,0"
+                                    VerticalAlignment="Center" IsVisible="{Binding !IsLast}" />
+                          </Grid>
+                          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource ZsText}" />
+                          <TextBlock Text="{Binding Hint}" Classes="caption" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <ProgressBar IsIndeterminate="True" Height="3" MinHeight="3" IsVisible="{Binding IsSearching}" />
+                  <TextBlock Classes="caption" Text="На время поиска основной обход выключается и потом включается обратно." />
+                </StackPanel>
+              </Border>
 
-              <Button Content="+ Профиль" Command="{Binding AddProfileCommand}" IsVisible="{Binding !IsReadOnly}" />
+              <Border Classes="card reveal" IsVisible="{Binding Phase, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="title" Text="{Binding Phase}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}"
+                             IsVisible="{Binding Summary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <DockPanel Classes="reveal" IsVisible="{Binding Best, Converter={x:Static ObjectConverters.IsNotNull}}" Margin="0,4,0,0">
+                    <Button DockPanel.Dock="Right" Classes="primary" Content="Сохранить стратегию" Command="{Binding SaveResultCommand}" Margin="10,0,0,0" />
+                    <TextBox Text="{Binding ResultName}" VerticalAlignment="Center" />
+                  </DockPanel>
+                </StackPanel>
+              </Border>
 
+              <Border Classes="card reveal" IsVisible="{Binding Tested.Count, Converter={x:Static app:Converters.IsPositive}}">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="title" Text="Проверенные варианты" />
+                  <ItemsControl ItemsSource="{Binding Tested}" Classes="appear">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ScoreRow">
+                        <Grid ColumnDefinitions="*,Auto,80" Margin="0,3">
+                          <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource ZsText}" Margin="0,0,12,0" />
+                          <TextBlock Grid.Column="1" Classes="score" Classes.full="{Binding IsFull}" Classes.zero="{Binding IsZero}"
+                                     Classes.failed="{Binding IsFailed}" Text="{Binding Result}" HorizontalAlignment="Right"
+                                     Foreground="{DynamicResource ZsText}" />
+                          <TextBlock Grid.Column="2" Text="{Binding Latency}" Classes="caption" HorizontalAlignment="Right" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </ScrollViewer>
-          </DockPanel>
-        </Grid>
-      </TabItem>
+        </TabItem>
 
-      <!-- Поиск -->
-      <TabItem Header="Поиск">
-        <ScrollViewer Padding="28" DataContext="{Binding Search}" x:DataType="vm:SearchViewModel">
-          <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Stretch">
-            <TextBlock Classes="h1" Text="Поиск стратегии" />
+        <!-- ═══ Настройки ═══ -->
+        <TabItem AutomationProperties.Name="Настройки">
+          <TabItem.Header>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Path Classes="icon" Stroke="{Binding $parent[TabItem].Foreground}"
+                    Data="M2.5,5.5 L6,5.5 M10,5.5 L15.5,5.5 M2.5,12.5 L9,12.5 M13,12.5 L15.5,12.5 M10,5.5 A2,2 0 1 1 6,5.5 A2,2 0 1 1 10,5.5 M13,12.5 A2,2 0 1 1 9,12.5 A2,2 0 1 1 13,12.5" />
+              <TextBlock Text="Настройки" VerticalAlignment="Center" />
+            </StackPanel>
+          </TabItem.Header>
+          <ScrollViewer Padding="28">
+            <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Stretch">
+              <TextBlock Classes="h1" Text="Настройки" />
 
-            <Border Classes="card" IsVisible="{Binding !IsWindows}">
-              <TextBlock Classes="muted" Text="Поиск запускает движок, поэтому работает только под Windows." />
-            </Border>
-
-            <Border Classes="card">
-              <Grid ColumnDefinitions="*,20,200">
-                <StackPanel Spacing="6">
-                  <TextBlock Classes="muted" Text="Сайты для проверки, по одному на строку" />
-                  <TextBox Text="{Binding TargetsText}" AcceptsReturn="True" Height="96" IsEnabled="{Binding !IsSearching}" />
-                </StackPanel>
-                <StackPanel Grid.Column="2" Spacing="6">
-                  <TextBlock Classes="muted" Text="Лимит времени" />
-                  <ComboBox ItemsSource="{Binding Budgets}" SelectedItem="{Binding BudgetMinutes}"
-                            IsEnabled="{Binding !IsSearching}" HorizontalAlignment="Stretch">
-                    <ComboBox.ItemTemplate>
-                      <DataTemplate x:DataType="sys:Int32">
-                        <TextBlock Text="{Binding StringFormat='{}{0} мин'}" />
+              <Border Classes="card">
+                <StackPanel Spacing="14">
+                  <TextBlock Classes="title" Text="Оформление" />
+                  <ItemsControl ItemsSource="{Binding Themes}" Margin="0,0,-12,-12">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><UniformGrid Columns="3" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ThemeOption">
+                        <Button Classes="tile" Command="{Binding SelectCommand}" Margin="0,0,12,12"
+                                AutomationProperties.Name="{Binding Name}">
+                          <Border Classes="tileFrame" Classes.selected="{Binding IsSelected}" Padding="4">
+                            <StackPanel>
+                              <Border Height="86" CornerRadius="6" ClipToBounds="True" Background="{Binding BackgroundBrush}">
+                                <Panel>
+                                  <c:BackdropView Kind="{Binding Theme.Backdrop}" EffectColor="{Binding Theme.Effect}" Animated="False" />
+                                  <Border Width="30" HorizontalAlignment="Left" Background="{Binding SurfaceBrush}" Opacity="0.85" />
+                                  <StackPanel Margin="42,16,12,0" Spacing="6">
+                                    <Border Height="6" Width="72" CornerRadius="3" Background="{Binding TextBrush}" HorizontalAlignment="Left" />
+                                    <Border Height="4" Width="104" CornerRadius="2" Background="{Binding MutedBrush}" HorizontalAlignment="Left" />
+                                    <Border Height="12" Width="42" CornerRadius="4" Background="{Binding AccentBrush}" HorizontalAlignment="Left" Margin="0,6,0,0" />
+                                  </StackPanel>
+                                </Panel>
+                              </Border>
+                              <DockPanel Margin="8,9,6,2">
+                                <Path DockPanel.Dock="Right" Data="M4,9 L7.2,12.2 L13,5.8" Stroke="{DynamicResource ZsAccent}" StrokeThickness="2"
+                                      StrokeLineCap="Round" StrokeJoin="Round" Width="18" Height="18" IsVisible="{Binding IsSelected}" />
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource ZsText}" />
+                              </DockPanel>
+                              <TextBlock Text="{Binding Tagline}" Classes="caption" Margin="8,0,8,8" Height="32" />
+                            </StackPanel>
+                          </Border>
+                        </Button>
                       </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                  </ComboBox>
-                  <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
-                    <Button Classes="primary" Content="Искать" Command="{Binding StartCommand}" />
-                    <Button Classes="danger" Content="Стоп" Command="{Binding CancelCommand}" />
-                  </StackPanel>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <DockPanel Classes="reveal" IsVisible="{Binding Theme.HasBackdrop}" Margin="0,2,0,0">
+                    <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding AnimatedBackdrop}"
+                                  AutomationProperties.Name="Движение фона" Margin="16,0,0,0" />
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="title" Text="Движение фона" FontSize="14" />
+                      <TextBlock Classes="muted" Text="Выключите, если отвлекает или ноутбук греется: фон станет неподвижной картинкой. Когда в Windows выключены эффекты анимации, фон неподвижен всегда." />
+                    </StackPanel>
+                  </DockPanel>
                 </StackPanel>
-              </Grid>
-            </Border>
+              </Border>
 
-            <TextBlock Classes="muted" TextWrapping="Wrap"
-                       Text="Сначала сайты проверяются без обхода. Затем перебираются техники обхода, у лучших подбираются параметры, а победитель проверяется ещё дважды. Основной обход на время поиска выключается." />
-
-            <Border Classes="card" IsVisible="{Binding Phase, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-              <StackPanel Spacing="10">
-                <StackPanel Orientation="Horizontal" Spacing="12">
-                  <ProgressBar IsIndeterminate="True" Width="80" IsVisible="{Binding IsSearching}" VerticalAlignment="Center" />
-                  <TextBlock Text="{Binding Phase}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                </StackPanel>
-                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" IsVisible="{Binding Summary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                <DockPanel IsVisible="{Binding Best, Converter={x:Static ObjectConverters.IsNotNull}}">
-                  <Button DockPanel.Dock="Right" Classes="primary" Content="Сохранить стратегию" Command="{Binding SaveResultCommand}" Margin="10,0,0,0" />
-                  <TextBox Text="{Binding ResultName}" />
-                </DockPanel>
-              </StackPanel>
-            </Border>
-
-            <Border Classes="card" IsVisible="{Binding Tested.Count}">
-              <StackPanel Spacing="8">
-                <TextBlock Classes="muted" Text="Проверенные варианты" />
-                <ItemsControl ItemsSource="{Binding Tested}" Classes="appear">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:ScoreRow">
-                      <Grid ColumnDefinitions="*,120,80" Margin="0,3">
-                        <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Grid.Column="1" Text="{Binding Result}" HorizontalAlignment="Right" />
-                        <TextBlock Grid.Column="2" Text="{Binding Latency}" Classes="muted" HorizontalAlignment="Right" />
-                      </Grid>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </StackPanel>
-            </Border>
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
-
-      <!-- Настройки -->
-      <TabItem Header="Настройки">
-        <ScrollViewer Padding="28">
-          <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Stretch">
-            <TextBlock Classes="h1" Text="Настройки" />
-            <Border Classes="card">
-              <StackPanel Spacing="10">
-                <ToggleSwitch IsChecked="{Binding WatchdogEnabled}" OnContent="Сторож включён" OffContent="Сторож выключен" />
-                <TextBlock Classes="muted" Text="Пока обход работает, сторож раз в 5 минут проверяет www.youtube.com, discord.com и rutracker.org. Если открывается меньше, чем сразу после включения, и так две проверки подряд, он проверяет остальные стратегии и переключается на лучшую. Между переключениями не меньше 30 минут." />
-                <TextBlock Classes="muted" Text="Если с текущей стратегией эти сайты не открывались с самого начала, сторож не переключает вслепую и советует запустить поиск." />
-              </StackPanel>
-            </Border>
-            <Border Classes="card">
-              <StackPanel Spacing="10">
-                <ToggleSwitch IsChecked="{Binding CloseToTray}" OnContent="Закрытие окна прячет в трей" OffContent="Закрытие окна выключает обход" />
-                <TextBlock Classes="muted" Text="Пока обход включён, крестик прячет окно в трей, и обход продолжает работать. Выйти насовсем можно через меню значка в трее." />
-              </StackPanel>
-            </Border>
-            <Border Classes="card">
-              <StackPanel Spacing="10">
-                <ToggleSwitch IsChecked="{Binding CommunityEnabled}" OnContent="Обмен с сообществом включён"
-                              OffContent="Обмен с сообществом выключен" />
-                <TextBlock Classes="muted" Text="Включено: приложение может брать стратегии из общей базы, а стратегии, найденные поиском, отправляются в неё." />
-                <TextBlock Classes="muted" Text="Отправляется: номер сети провайдера (ASN), регион (субъект), параметры стратегии и результат проверки. Только если поиск шёл по стандартному набору сайтов." />
-                <TextBlock Classes="muted" Text="Не отправляется никогда: ваши списки сайтов, свой набор сайтов для поиска, журналы, история соединений. Сервер при этом видит ваш IP-адрес, как любой сайт, к которому вы подключаетесь." />
-                <TextBlock Classes="muted" FontStyle="Italic" Text="Сервер базы ещё не запущен: переключатель сохраняется, но обмен пока не происходит." />
-              </StackPanel>
-            </Border>
-            <Border Classes="card" DataContext="{Binding Blocklists}" x:DataType="vm:BlocklistsViewModel">
-              <StackPanel Spacing="10">
+              <Border Classes="card">
                 <DockPanel>
-                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10">
-                    <ProgressBar IsIndeterminate="True" Width="60" IsVisible="{Binding IsUpdating}" VerticalAlignment="Center" />
-                    <Button Content="Обновить сейчас" Command="{Binding UpdateNowCommand}" />
+                  <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding WatchdogEnabled}"
+                                AutomationProperties.Name="Сторож" Margin="16,0,0,0" />
+                  <StackPanel Spacing="4">
+                    <TextBlock Classes="title" Text="Сторож" />
+                    <TextBlock Classes="muted" Text="Пока обход включён, раз в 5 минут проверяет www.youtube.com, discord.com и rutracker.org. Если сайты перестали открываться, сам подбирает стратегию получше, но не чаще раза в 30 минут. Если сайты не открывались с самого начала, стратегию не трогает и советует поиск." />
                   </StackPanel>
-                  <TextBlock Text="Списки блокировок" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </DockPanel>
-                <ItemsControl ItemsSource="{Binding Items}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:SubscriptionStatus">
-                      <StackPanel Margin="0,4" Spacing="2">
-                        <DockPanel>
-                          <TextBlock DockPanel.Dock="Right" Text="{Binding Info}" Classes="muted" />
-                          <TextBlock Text="{Binding Title}" />
-                        </DockPanel>
-                        <TextBlock Text="{Binding Error}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap"
-                                   IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                      </StackPanel>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBlock Classes="muted" Text="Обновляются при запуске приложения, если старше суток, или кнопкой. Движок подхватывает новые списки сам, без перезапуска. Источники: Re:filter и antifilter community. Из списка IP выброшены подсети больше 65 536 адресов (в исходных данных там Cloudflare и Google) и служебные адреса. Если загрузка выглядит обрезанной, остаётся прежний список." />
-                <DockPanel Margin="0,6,0,0">
-                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-                    <Button Content="Пересчитать" Command="{Binding RefreshAutoCommand}" />
-                    <Button Content="Очистить" Command="{Binding ClearAutoCommand}" />
-                  </StackPanel>
-                  <TextBlock Text="{Binding AutoInfo}" VerticalAlignment="Center" />
-                </DockPanel>
-                <TextBlock Classes="muted" Text="Автосписок ведёт сам движок. Если туда попал рабочий сайт и обход его ломает, впишите домен в exclude.txt — туда он больше не попадёт." />
-              </StackPanel>
-            </Border>
-            <Border Classes="card">
-              <StackPanel Spacing="10">
-                <TextBlock Text="Свои списки" FontWeight="SemiBold" />
-                <TextBlock Classes="muted" Text="Файлы .txt, по домену на строку, поддомены подхватываются автоматически. general.txt и новые файлы — ваши. blocked.txt перезаписывается при обновлении. exclude.txt — домены, которые обход не трогает." />
-                <TextBlock Classes="muted" Text="{Binding ListStore.Directory}" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" />
-                <Button Content="Открыть папку" Command="{Binding OpenListsFolderCommand}" IsEnabled="{Binding IsWindows}" />
-              </StackPanel>
-            </Border>
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
+              </Border>
 
-    </TabControl>
-  </Grid>
+              <Border Classes="card">
+                <DockPanel>
+                  <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding CloseToTray}"
+                                AutomationProperties.Name="Сворачивать в трей" Margin="16,0,0,0" />
+                  <StackPanel Spacing="4">
+                    <TextBlock Classes="title" Text="Сворачивать в трей" />
+                    <TextBlock Classes="muted" Text="Пока обход включён, крестик прячет окно, а обход продолжает работать. Выйти совсем можно из меню значка в трее." />
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <Border Classes="card">
+                <StackPanel Spacing="12">
+                  <DockPanel>
+                    <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding CommunityEnabled}"
+                                  AutomationProperties.Name="Обмен стратегиями с сообществом" Margin="16,0,0,0" />
+                    <StackPanel Spacing="4">
+                      <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Classes="title" Text="Обмен стратегиями" VerticalAlignment="Center" />
+                        <Border Classes="chip warn" Margin="0" VerticalAlignment="Center">
+                          <TextBlock Text="сервер ещё не запущен" />
+                        </Border>
+                      </StackPanel>
+                      <TextBlock Classes="muted" Text="Приложение сможет брать стратегии из общей базы и отправлять туда найденные поиском. Анонимно. Пока сервера нет, переключатель только запоминается." />
+                    </StackPanel>
+                  </DockPanel>
+                  <Grid ColumnDefinitions="96,*" RowDefinitions="Auto,Auto">
+                    <TextBlock Text="Уходит" Classes="caption" FontWeight="SemiBold" Margin="0,0,0,8" />
+                    <TextBlock Grid.Column="1" Classes="muted" Margin="0,0,0,8"
+                               Text="номер сети провайдера (ASN), регион, параметры стратегии и результат проверки. Только если поиск шёл по стандартным сайтам." />
+                    <TextBlock Grid.Row="1" Text="Не уходит" Classes="caption" FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Classes="muted"
+                               Text="ваши списки и сайты, журналы, история соединений. Сервер увидит только ваш IP-адрес, как любой сайт." />
+                  </Grid>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" DataContext="{Binding Blocklists}" x:DataType="vm:BlocklistsViewModel">
+                <StackPanel Spacing="10">
+                  <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10">
+                      <ProgressBar IsIndeterminate="True" Width="60" IsVisible="{Binding IsUpdating}" VerticalAlignment="Center" />
+                      <Button Classes="small" Content="Обновить сейчас" Command="{Binding UpdateNowCommand}" />
+                    </StackPanel>
+                    <TextBlock Text="Списки блокировок" Classes="title" VerticalAlignment="Center" />
+                  </DockPanel>
+                  <ItemsControl ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:SubscriptionStatus">
+                        <StackPanel Margin="0,4" Spacing="2">
+                          <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding Info}" Classes="caption" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Title}" Foreground="{DynamicResource ZsText}" />
+                          </DockPanel>
+                          <TextBlock Classes="error reveal" Text="{Binding Error}"
+                                     IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock Classes="muted" Text="Обновляются, когда старше суток: при запуске и в фоне, пока приложение открыто. Движок подхватывает новые списки без перезапуска. Источники: Re:filter и antifilter community. Из списка IP выброшены подсети больше 65 536 адресов (там Cloudflare и Google) и служебные адреса. Если загрузка выглядит обрезанной, остаётся прежний список." />
+                  <Border Height="1" Background="{DynamicResource ZsBorder}" Margin="0,4" />
+                  <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+                      <Button Classes="small" Content="Пересчитать" Command="{Binding RefreshAutoCommand}" />
+                      <Button Classes="small" Content="Очистить" Command="{Binding ClearAutoCommand}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding AutoInfo}" VerticalAlignment="Center" Foreground="{DynamicResource ZsText}" />
+                  </DockPanel>
+                  <TextBlock Classes="muted" Text="Автосписок ведёт сам движок. Если туда попал рабочий сайт и обход его ломает, впишите домен в exclude.txt, и больше он туда не попадёт." />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="Свои списки" Classes="title" />
+                  <TextBlock Classes="muted" Text="Файлы .txt, по домену на строку, поддомены подхватываются сами. general.txt и новые файлы ваши, blocked.txt перезаписывается при обновлении, в exclude.txt домены, которые обход не трогает." />
+                  <SelectableTextBlock Classes="muted" Text="{Binding ListStore.Directory}" FontFamily="{DynamicResource ZsMonoFont}" FontSize="12" />
+                  <Button Classes="small" Content="Открыть папку" Command="{Binding OpenListsFolderCommand}" IsEnabled="{Binding IsWindows}"
+                          HorizontalAlignment="Left" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+      </TabControl>
+
+      <!-- Состояние видно с любой вкладки. -->
+      <StackPanel HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="26,0,0,18" Width="160" Spacing="3" IsHitTestVisible="False">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Ellipse Width="8" Height="8" Classes="dot" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsBusy}" VerticalAlignment="Center" />
+          <TextBlock Text="{Binding StatusShort}" FontSize="12" Foreground="{DynamicResource ZsText}" VerticalAlignment="Center" />
+        </StackPanel>
+        <TextBlock Text="{x:Static vm:MainWindowViewModel.VersionText}" Classes="caption" Margin="16,0,0,0" />
+      </StackPanel>
+    </Grid>
+
+    <Panel x:Name="OverlayHost" IsHitTestVisible="False" />
+  </Panel>
 </Window>

@@ -18,6 +18,12 @@ public sealed record AppSettings
 
     /// <summary>Закрытие окна при включённом обходе прячет приложение в трей, а не выключает обход.</summary>
     public bool CloseToTray { get; init; } = true;
+
+    /// <summary>Тема оформления. Неизвестный или пустой id означает тему по умолчанию.</summary>
+    public string? ThemeId { get; init; }
+
+    /// <summary>Анимировать фон темы (бинарный дождь, снег и т. п.). Выключено: фон неподвижен.</summary>
+    public bool AnimatedBackdrop { get; init; } = true;
 }
 
 public sealed class SettingsStore(string path)

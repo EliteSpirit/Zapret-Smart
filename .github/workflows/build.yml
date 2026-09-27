@@ -5,6 +5,12 @@ on:
     branches: ['**']
   pull_request:
   workflow_call:
+    inputs:
+      version:
+        description: 'Номер версии для сборки, например 0.3.0. Пусто: 0.0.0-dev.'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -71,9 +77,15 @@ jobs:
 
       - name: Publish
         shell: pwsh
+        env:
+          ZS_VERSION: ${{ inputs.version }}
         run: |
           $out = "artifacts/ZapretSmart"
-          dotnet publish src/ZapretSmart.App -c Release -r win-x64 --self-contained -o $out
+          # Номер приходит через переменную окружения, а не подстановкой в текст скрипта, и проверяется по формату.
+          $version = "$env:ZS_VERSION".TrimStart('v')
+          if ($version -and $version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$') { throw "bad version: $version" }
+          $versionArgs = if ($version) { @("-p:Version=$version") } else { @() }
+          dotnet publish src/ZapretSmart.App -c Release -r win-x64 --self-contained -o $out @versionArgs
           $engine = "$out/engine"
           Copy-Item engine/nfq/winws.exe $engine
           Copy-Item C:/cygwin/bin/cygwin1.dll $engine

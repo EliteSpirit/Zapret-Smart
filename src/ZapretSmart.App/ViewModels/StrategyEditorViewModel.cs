@@ -18,6 +18,9 @@ public sealed partial class ListToggle(string id, string title, bool isChecked, 
     partial void OnIsCheckedChanged(bool value) => changed();
 }
 
+/// <summary>Метка списка в режиме просмотра. Accent — список обновляется сам (подписка или автосписок).</summary>
+public sealed record ProfileChip(string Text, bool IsAccent);
+
 public sealed partial class ProfileEditorViewModel : ObservableObject
 {
     private readonly Action _changed;
@@ -28,6 +31,7 @@ public sealed partial class ProfileEditorViewModel : ObservableObject
         _changed = () =>
         {
             OnPropertyChanged(nameof(ScopeHint));
+            OnPropertyChanged(nameof(FilterSummary));
             owner.Revalidate();
         };
         var hostlists = profile?.Hostlists ?? ["general", Subscriptions.BlockedDomains.Id];
@@ -43,6 +47,31 @@ public sealed partial class ProfileEditorViewModel : ObservableObject
     private static string Title(string id) => Subscriptions.IsSubscription(id) ? id + " (обновляется сам)" : id;
 
     public StrategyEditorViewModel Owner { get; }
+
+    /// <summary>Номер профиля, как в сообщениях проверки («Профиль 2, строка 3»).</summary>
+    [ObservableProperty] private int _number = 1;
+
+    /// <summary>«TCP 80 · UDP 443» из filter-tcp/filter-udp. Пусто, если профиль ловит весь перехватываемый трафик.</summary>
+    public string FilterSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+            foreach (var line in Args)
+            {
+                if (line.StartsWith("filter-tcp=", StringComparison.Ordinal)) parts.Add("TCP " + line["filter-tcp=".Length..]);
+                else if (line.StartsWith("filter-udp=", StringComparison.Ordinal)) parts.Add("UDP " + line["filter-udp=".Length..]);
+            }
+            return string.Join(" · ", parts);
+        }
+    }
+
+    public IReadOnlyList<ProfileChip> Chips =>
+        HostToggles.Where(t => t.IsChecked).Select(t => new ProfileChip(t.Id, Subscriptions.IsSubscription(t.Id)))
+            .Concat(AutoHostlist ? [new ProfileChip("автосписок", true)] : [])
+            .Concat(IpToggles.Where(t => t.IsChecked).Select(t => new ProfileChip(t.Id, Subscriptions.IsSubscription(t.Id))))
+            .DefaultIfEmpty(new ProfileChip("без списков: весь трафик на своих портах", false))
+            .ToList();
 
     public static IReadOnlyList<string> OptionNames { get; } = EngineOptionCatalog.Names.Order(StringComparer.Ordinal).ToList();
 
@@ -99,6 +128,10 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
     {
         _main = main;
         ReloadListIds();
+        Profiles.CollectionChanged += (_, _) =>
+        {
+            for (var i = 0; i < Profiles.Count; i++) Profiles[i].Number = i + 1;
+        };
     }
 
     public IReadOnlyList<string> HostlistIds { get; private set; } = [];
@@ -114,20 +147,36 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(DeleteCommand))]
+    [NotifyPropertyChangedFor(nameof(CanDeleteSelected))]
+    [NotifyPropertyChangedFor(nameof(SaveStatus))]
     private string? _editingId;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SaveCommand))]
     [NotifyCanExecuteChangedFor(nameof(DeleteCommand))]
+    [NotifyPropertyChangedFor(nameof(CanDeleteSelected))]
     private bool _isReadOnly;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SaveCommand))]
+    [NotifyPropertyChangedFor(nameof(IsSaved))]
     private bool _isValid;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SaveCommand))]
+    [NotifyPropertyChangedFor(nameof(IsSaved))]
+    [NotifyPropertyChangedFor(nameof(SaveStatus))]
     private bool _isDirty;
+
+    /// <summary>Кнопка «Удалить» открывает подтверждение, поэтому её доступность нужна отдельным свойством.</summary>
+    public bool CanDeleteSelected => CanDelete();
+
+    public bool IsSaved => IsValid && !IsDirty;
+
+    public string SaveStatus =>
+        !IsDirty ? "Сохранено"
+        : EditingId is null ? "Новая стратегия ещё не сохранена"
+        : "Есть несохранённые изменения";
 
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private string _description = "";

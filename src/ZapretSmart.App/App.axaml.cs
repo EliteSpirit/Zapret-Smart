@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using ZapretSmart.App.Theming;
 using ZapretSmart.App.ViewModels;
 using ZapretSmart.App.Views;
 
@@ -15,7 +16,12 @@ public partial class App : Application
 
     private DispatcherTimer? _listsTimer;
 
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        AvaloniaXamlLoader.Load(this);
+        // Ресурсы темы нужны до загрузки окна. Выбранную в настройках тему окно применит, получив модель.
+        ThemeResources.Apply(this, AppTheme.Default);
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {

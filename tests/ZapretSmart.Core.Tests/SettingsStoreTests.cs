@@ -21,7 +21,19 @@ public sealed class SettingsStoreTests : IDisposable
         var loaded = new SettingsStore(path).Load();
         Assert.True(loaded.WatchdogEnabled);
         Assert.True(loaded.CloseToTray);
+        Assert.True(loaded.AnimatedBackdrop);
+        Assert.Null(loaded.ThemeId);
         Assert.True(new AppSettings().WatchdogEnabled);
+    }
+
+    [Fact]
+    public void ThemeAndBackdropRoundTrip()
+    {
+        var store = new SettingsStore(Path.Combine(_dir, "settings.json"));
+        store.Save(new AppSettings { ThemeId = "hacker", AnimatedBackdrop = false });
+        var loaded = store.Load();
+        Assert.Equal("hacker", loaded.ThemeId);
+        Assert.False(loaded.AnimatedBackdrop);
     }
 
     [Fact]
