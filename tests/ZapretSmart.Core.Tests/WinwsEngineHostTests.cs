@@ -31,11 +31,34 @@ public sealed class WinwsEngineHostTests : IDisposable
     private WinwsEngineHost HostWith(string script, TimeSpan? timeout = null)
     {
         var exe = Path.Combine(_dir, "fake-winws");
-        File.WriteAllText(exe, "#!/bin/sh\necho $$ > '" + PidFile + "'\n" + script + "\n");
+        File.WriteAllText(exe, "#!/bin/sh\n[ \"$1\" = --probe ] && exit 0\necho $$ > '" + PidFile + "'\n" + script + "\n");
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(exe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        WaitUntilExecutable(exe);
         return new WinwsEngineHost(exe, new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(_dir, "lists"), Path.Combine(_dir, "ipsets")),
             timeout ?? TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>
+    /// Только что записанный скрипт Linux может отказаться исполнять с ETXTBSY («Text file busy»): если другой тест
+    /// в этом же процессе сделал fork, пока файл был открыт на запись, дочерний процесс держит дескриптор до своего exec.
+    /// Один удачный пробный запуск значит, что таких держателей больше нет, а новым взяться неоткуда: файл уже закрыт.
+    /// </summary>
+    private static void WaitUntilExecutable(string exe)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var p = Process.Start(new ProcessStartInfo(exe, "--probe") { UseShellExecute = false })!;
+                p.WaitForExit();
+                return;
+            }
+            catch (System.ComponentModel.Win32Exception) when (attempt < 100)
+            {
+                Thread.Sleep(10);
+            }
+        }
     }
 
     private static readonly Candidate Split = new("x", ["dpi-desync=multisplit"]);
