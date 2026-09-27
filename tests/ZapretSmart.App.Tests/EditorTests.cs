@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -317,6 +318,57 @@ public sealed class EditorTests : IDisposable
         var vm = CreateVm();
         vm.Dispose();
         Assert.False(vm.StartCommand.CanExecute(null));
+    }
+
+    [AvaloniaFact]
+    public void DuringStrategySwitchOnlyStopIsAvailable()
+    {
+        var vm = CreateVm();
+        vm.IsSwitching = true;
+        Assert.False(vm.StartCommand.CanExecute(null));
+        Assert.True(vm.StopCommand.CanExecute(null));
+        vm.IsSwitching = false;
+    }
+
+    [AvaloniaFact]
+    public void WatchdogAndTraySettingsPersist()
+    {
+        var vm = CreateVm();
+        Assert.True(vm.WatchdogEnabled);
+        vm.WatchdogEnabled = false;
+        vm.CloseToTray = false;
+        var again = CreateVm();
+        Assert.False(again.WatchdogEnabled);
+        Assert.False(again.CloseToTray);
+    }
+
+    /// <summary>Часы анимаций, которые идут только по команде: проверка не зависит от скорости машины.</summary>
+    [AvaloniaFact]
+    public void TabSwitchPlaysEnterAnimation()
+    {
+        var vm = CreateVm();
+        var w = new MainWindow { DataContext = vm };
+        w.Show();
+        var tabs = w.GetVisualDescendants().OfType<TabControl>().Single();
+        tabs.SelectedIndex = 3;
+        var page = (Visual)tabs.SelectedContent!;
+
+        // Часы headless-платформы идут по настоящему времени: под нагрузкой 180 мс анимации проходят между двумя тиками.
+        // Поэтому смотрим не на мгновенное значение, а на то, что прозрачность вообще проходила через ноль.
+        var lowest = page.Opacity;
+        page.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Visual.OpacityProperty) lowest = Math.Min(lowest, (double)e.NewValue!);
+        };
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        do
+        {
+            Dispatcher.UIThread.RunJobs();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+        } while ((lowest >= 1 || page.Opacity < 1) && DateTime.UtcNow < deadline);
+
+        Assert.True(lowest < 0.1, "содержимое вкладки должно появляться, а не выскакивать");
+        Assert.Equal(1, page.Opacity, 3);
     }
 
     [AvaloniaFact]

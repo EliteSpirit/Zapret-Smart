@@ -16,6 +16,7 @@ public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, 
         var argv = EngineCommandBuilder.Build(strategy, layout).Argv;
         var runner = new EngineRunner(executablePath);
         var output = new ConcurrentQueue<string>();
+        var errors = new ConcurrentQueue<string>();
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         runner.Output += line =>
@@ -23,8 +24,9 @@ public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, 
             output.Enqueue(line);
             if (line.Contains(ReadyMarker, StringComparison.Ordinal)) ready.TrySetResult();
         };
+        runner.ErrorOutput += line => { if (!string.IsNullOrWhiteSpace(line)) errors.Enqueue(line); };
         runner.Exited += code => ready.TrySetException(
-            new EngineStartException($"движок завершился с кодом {code}: {string.Join(" | ", output.TakeLast(5))}"));
+            new EngineStartException($"движок завершился с кодом {code}: {Tail(errors, output)}"));
 
         _live[runner] = 0;
         try
@@ -41,7 +43,7 @@ public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, 
         catch (TimeoutException)
         {
             Release(runner);
-            throw new EngineStartException($"движок не начал перехват за {readyTimeout.TotalSeconds:0} с: {string.Join(" | ", output.TakeLast(5))}");
+            throw new EngineStartException($"движок не начал перехват за {readyTimeout.TotalSeconds:0} с: {Tail(errors, output)}");
         }
         catch
         {
@@ -49,6 +51,14 @@ public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, 
             throw;
         }
         return new Session(this, runner);
+    }
+
+    /// <summary>Сначала stderr (причина отказа), потом хвост общего вывода без пустых строк.</summary>
+    private static string Tail(IEnumerable<string> errors, IEnumerable<string> output)
+    {
+        var err = errors.TakeLast(3).ToList();
+        var rest = output.Where(l => !string.IsNullOrWhiteSpace(l) && !err.Contains(l)).TakeLast(5 - err.Count);
+        return string.Join(" | ", err.Concat(rest));
     }
 
     private void Release(EngineRunner runner)

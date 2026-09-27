@@ -7,7 +7,14 @@ public sealed class EngineRunner(string executablePath) : IDisposable
     private readonly object _gate = new();
     private Process? _process;
 
+    /// <summary>Одно задание на всё приложение: дескриптор живёт до конца процесса и закрывается ОС при его смерти.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static readonly Lazy<KillOnCloseJob> SharedJob = new(() => new KillOnCloseJob());
+
     public event Action<string>? Output;
+
+    /// <summary>Только stderr, дополнительно к Output. Туда движок пишет причину отказа, а stdout он сбрасывает при выходе, и та строка тонет в хвосте.</summary>
+    public event Action<string>? ErrorOutput;
     public event Action<int>? Exited;
 
     public string ExecutablePath { get; } = executablePath;
@@ -38,7 +45,12 @@ public sealed class EngineRunner(string executablePath) : IDisposable
 
             var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
             p.OutputDataReceived += (_, e) => { if (e.Data is not null) Output?.Invoke(e.Data); };
-            p.ErrorDataReceived += (_, e) => { if (e.Data is not null) Output?.Invoke(e.Data); };
+            p.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is null) return;
+                ErrorOutput?.Invoke(e.Data);
+                Output?.Invoke(e.Data);
+            };
             p.Exited += (_, _) =>
             {
                 int code;
@@ -58,9 +70,24 @@ public sealed class EngineRunner(string executablePath) : IDisposable
             };
 
             p.Start();
+            BindToAppLifetime(p);
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
             _process = p;
+        }
+    }
+
+    private void BindToAppLifetime(Process p)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            SharedJob.Value.Assign(p);
+        }
+        catch (System.ComponentModel.Win32Exception e)
+        {
+            // Движок работает и без этого, но при падении приложения останется в фоне: предупреждаем, а не падаем.
+            Output?.Invoke("! Движок не привязан к приложению (" + e.Message + "): при аварийном закрытии его придётся завершить вручную");
         }
     }
 

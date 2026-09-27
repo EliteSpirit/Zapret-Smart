@@ -12,6 +12,12 @@ public sealed record AppSettings
     public bool CommunityEnabled { get; init; }
 
     public string? SelectedStrategyId { get; init; }
+
+    /// <summary>Пока обход включён, периодически проверять сайты и переключать стратегию, если они перестали открываться.</summary>
+    public bool WatchdogEnabled { get; init; } = true;
+
+    /// <summary>Закрытие окна при включённом обходе прячет приложение в трей, а не выключает обход.</summary>
+    public bool CloseToTray { get; init; } = true;
 }
 
 public sealed class SettingsStore(string path)
