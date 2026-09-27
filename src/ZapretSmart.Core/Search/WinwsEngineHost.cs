@@ -32,6 +32,12 @@ public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, 
             runner.Start(argv);
             await ready.Task.WaitAsync(readyTimeout, ct).ConfigureAwait(false);
         }
+        catch (System.ComponentModel.Win32Exception e)
+        {
+            // Антивирус заблокировал запуск, файл занят или нет прав.
+            Release(runner);
+            throw new EngineStartException("не удалось запустить движок: " + e.Message);
+        }
         catch (TimeoutException)
         {
             Release(runner);

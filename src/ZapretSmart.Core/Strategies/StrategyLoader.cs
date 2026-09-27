@@ -41,14 +41,31 @@ public static class StrategyLoader
 
     public static LoadedStrategy LoadFile(string path)
     {
-        var info = new FileInfo(path);
-        if (info.Length > MaxFileBytes)
-            return new LoadedStrategy(path, null, [$"файл больше {MaxFileBytes / 1024} КБ"]);
-        return Parse(File.ReadAllText(path), path);
+        try
+        {
+            if (new FileInfo(path).Length > MaxFileBytes)
+                return new LoadedStrategy(path, null, [$"файл больше {MaxFileBytes / 1024} КБ"]);
+            return Parse(File.ReadAllText(path), path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return new LoadedStrategy(path, null, ["не удалось прочитать: " + e.Message]);
+        }
     }
 
     public static IReadOnlyList<LoadedStrategy> LoadDirectory(string dir) =>
         Directory.Exists(dir)
             ? Directory.EnumerateFiles(dir, "*.json").Order(StringComparer.Ordinal).Select(LoadFile).ToList()
             : [];
+
+    /// <summary>
+    /// Свои стратегии сохраняются и удаляются по id, поэтому имя файла обязано совпадать с id.
+    /// Иначе после правки рядом появлялся бы второй файл с тем же id, а удаление не находило бы исходный.
+    /// </summary>
+    public static IReadOnlyList<LoadedStrategy> LoadUserDirectory(string dir) =>
+        LoadDirectory(dir)
+            .Select(l => l.IsValid && Path.GetFileNameWithoutExtension(l.Source) != l.Strategy!.Id
+                ? l with { Strategy = null, Errors = [$"имя файла должно совпадать с id: {l.Strategy.Id}.json"] }
+                : l)
+            .ToList();
 }

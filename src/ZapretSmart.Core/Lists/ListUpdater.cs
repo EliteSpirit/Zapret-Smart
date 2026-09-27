@@ -62,6 +62,7 @@ public sealed class ListUpdater(HttpClient http, string listsDir, string ipsetsD
     {
         var notes = new List<string>();
         var merged = new HashSet<string>(StringComparer.Ordinal);
+        var failedSources = 0;
         foreach (var src in sub.Sources)
         {
             string text;
@@ -72,6 +73,7 @@ public sealed class ListUpdater(HttpClient http, string listsDir, string ipsetsD
             catch (Exception e) when (e is HttpRequestException or IOException or InvalidDataException || (e is OperationCanceledException && !ct.IsCancellationRequested))
             {
                 notes.Add($"{src.Name}: не скачан ({e.GetBaseException().Message})");
+                failedSources++;
                 continue;
             }
 
@@ -79,6 +81,7 @@ public sealed class ListUpdater(HttpClient http, string listsDir, string ipsetsD
             if (parsed.Entries.Count < src.MinEntries)
             {
                 notes.Add($"{src.Name}: подозрительно мало записей ({parsed.Entries.Count}), пропущен");
+                failedSources++;
                 continue;
             }
             merged.UnionWith(parsed.Entries);
@@ -95,16 +98,33 @@ public sealed class ListUpdater(HttpClient http, string listsDir, string ipsetsD
             error = "ни один источник не дал данных";
         else if (merged.Count > MaxEntries)
             error = $"слишком много записей ({merged.Count})";
-        else if (previous > 0 && merged.Count < previous / 2)
-            error = $"записей стало {merged.Count} вместо {previous} — похоже на обрезанную загрузку";
+        // Резкое сокращение подозрительно, только если часть источников отвалилась: тогда список собран не целиком.
+        // Если все источники ответили, сокращение считается настоящим, иначе обновления блокировались бы навсегда.
+        else if (failedSources > 0 && previous > 0 && merged.Count < previous / 2)
+            error = $"записей стало {merged.Count} вместо {previous}, часть источников недоступна";
         if (error is not null)
             return new ListUpdateResult(sub, false, previous, notes, error + (previous > 0 ? "; оставлен прежний список" : ""));
 
         var path = PathFor(sub);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var tmp = path + ".tmp";
-        await File.WriteAllLinesAsync(tmp, merged.Order(StringComparer.Ordinal), ct).ConfigureAwait(false);
-        File.Move(tmp, path, overwrite: true);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllLinesAsync(tmp, merged.Order(StringComparer.Ordinal), ct).ConfigureAwait(false);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Файл может быть занят антивирусом или движком в момент перечитывания.
+            try
+            {
+                File.Delete(tmp);
+            }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            {
+            }
+            return new ListUpdateResult(sub, false, previous, notes, "не удалось записать файл: " + e.Message + (previous > 0 ? "; оставлен прежний список" : ""));
+        }
         return new ListUpdateResult(sub, true, merged.Count, notes, null);
     }
 

@@ -68,7 +68,15 @@ public sealed partial class BlocklistsViewModel : ObservableObject
             foreach (var item in due)
             {
                 item.Info = "обновляется…";
-                var r = await Task.Run(() => _updater.UpdateAsync(item.Subscription, CancellationToken.None));
+                ListUpdateResult r;
+                try
+                {
+                    r = await Task.Run(() => _updater.UpdateAsync(item.Subscription, CancellationToken.None));
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    r = new ListUpdateResult(item.Subscription, false, 0, [], e.Message);
+                }
                 item.Error = r.Error is null ? null : r.Error + (r.Notes.Count > 0 ? ". " + string.Join("; ", r.Notes) : "");
                 _main.AppendLog(r.Updated
                     ? $"Списки: «{item.Title}» обновлён, {Records(r.Entries)} ({string.Join("; ", r.Notes)})"

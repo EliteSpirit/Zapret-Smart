@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ZapretSmart.Core.Community;
+using ZapretSmart.Core.Engine;
 using ZapretSmart.Core.Lists;
 using ZapretSmart.Core.Search;
 using ZapretSmart.Core.Storage;
@@ -26,6 +27,7 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     private readonly MainWindowViewModel _main;
     private CancellationTokenSource? _cts;
     private WinwsEngineHost? _host;
+    private IReadOnlyList<string> _blocked = [];
     private string? _tempDir;
 
     public SearchViewModel(MainWindowViewModel main)
@@ -81,10 +83,12 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         Tested.Clear();
         Summary = "";
         _cts = new CancellationTokenSource();
+        var bypassWasOn = _main.IsRunning;
+        var runningId = _main.SelectedStrategy?.Strategy.Id;
 
         try
         {
-            if (_main.IsRunning)
+            if (bypassWasOn)
             {
                 _main.AppendLog("Поиск: основной обход остановлен на время поиска");
                 await _main.StopEngineAsync();
@@ -101,7 +105,7 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
             var options = new SearchOptions { Targets = targets, TimeBudget = TimeSpan.FromMinutes(BudgetMinutes) };
 
             var result = await Task.Run(() => search.RunAsync(options, progress, _cts.Token));
-            ShowResult(result, targets);
+            ApplyResult(result, targets);
         }
         catch (OperationCanceledException)
         {
@@ -117,11 +121,22 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
             Phase = "Поиск прерван";
             Summary = "Не найден движок: " + _main.Paths.EngineExe;
         }
+        catch (Exception e) when (e is StrategyRejectedException or IOException or UnauthorizedAccessException)
+        {
+            Phase = "Поиск прерван";
+            Summary = e.Message;
+        }
         finally
         {
             Cleanup();
             IsSearching = false;
             _main.IsSearching = false;
+            if (bypassWasOn && _main.StartCommand.CanExecute(null))
+            {
+                _main.SelectedStrategy = _main.Strategies.FirstOrDefault(x => x.Strategy.Id == runningId) ?? _main.SelectedStrategy;
+                _main.AppendLog("Поиск: основной обход включается обратно");
+                _main.StartCommand.Execute(null);
+            }
         }
     }
 
@@ -137,19 +152,23 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     {
         var name = string.IsNullOrWhiteSpace(ResultName) ? "Найденная стратегия" : ResultName.Trim();
         var id = UserStrategyStore.NewId();
-        var s = CandidateGenerator.ToStrategy(Best!.Candidate, id, name, ["general", Subscriptions.BlockedDomains.Id], autoHostlist: true,
-            $"Найдена поиском {DateTime.Now:dd.MM.yyyy}: {Best.Passed}/{Best.Total} целей, {Best.MedianLatency.TotalMilliseconds:0} мс. {Best.Candidate.Label}. Списки: general, blocked и автосписок. QUIC не перехватывается.");
+        // Сайты, на которых стратегию нашли, кладём в собственный список: в general и blocked их может не быть.
+        var s = CandidateGenerator.ToStrategy(Best!.Candidate, id, name, [id, "general", Subscriptions.BlockedDomains.Id], autoHostlist: true,
+            $"Найдена поиском {DateTime.Now:dd.MM.yyyy}: {Best.Passed}/{Best.Total} целей, {Best.MedianLatency.TotalMilliseconds:0} мс. {Best.Candidate.Label}. Списки: сайты из поиска ({id}), general, blocked и автосписок. QUIC не перехватывается.");
         try
         {
+            _main.ListStore.WriteHostlist(id, _blocked);
             _main.UserStrategies.Save(s);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is StrategyRejectedException or IOException or UnauthorizedAccessException)
         {
             Summary += "\nНе сохранено: " + e.Message;
             return;
         }
         _main.ReloadStrategies(id);
-        Summary += $"\nСохранено как «{name}» и выбрано на вкладке «Обход».";
+        Summary += _main.IsRunning
+            ? $"\nСохранено как «{name}». Сейчас работает другая стратегия: выключите обход и выберите новую на вкладке «Обход»."
+            : $"\nСохранено как «{name}» и выбрано на вкладке «Обход».";
     }
 
     private void OnProgress(SearchProgress p)
@@ -165,10 +184,11 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         if (p.Tested is not null) Tested.Insert(0, ScoreRow.From(p.Tested));
     }
 
-    private void ShowResult(SearchResult r, IReadOnlyList<string> targets)
+    public void ApplyResult(SearchResult r, IReadOnlyList<string> targets)
     {
         HasResult = true;
         Best = r.Best;
+        _blocked = r.Blocked;
         var lines = new List<string>();
         if (r.NotBlocked.Count > 0) lines.Add("Открываются и без обхода: " + string.Join(", ", r.NotBlocked));
         if (r.Blocked.Count == 0)
@@ -181,9 +201,11 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         }
         else
         {
-            lines.Add($"Лучшее: {r.Best.Candidate.Label} — {r.Best.Passed}/{r.Best.Total}, {r.Best.MedianLatency.TotalMilliseconds:0} мс, подтверждено повторными прогонами.");
+            lines.Add($"Лучшее: {r.Best.Candidate.Label}: {r.Best.Passed}/{r.Best.Total}, {r.Best.MedianLatency.TotalMilliseconds:0} мс, подтверждено повторными прогонами.");
+            if (r.MissedByBest.Count > 0)
+                lines.Add("С ней не открылись, хотя открывались другими вариантами (см. список ниже): " + string.Join(", ", r.MissedByBest));
             if (r.Unreachable.Count > 0)
-                lines.Add("Не открылись и с ней (вероятно, IP/DNS): " + string.Join(", ", r.Unreachable));
+                lines.Add("Не открыл ни один вариант (вероятно, блокировка по IP или подмена DNS): " + string.Join(", ", r.Unreachable));
         }
         if (r.BudgetExhausted) lines.Add("Время вышло до конца перебора — можно запустить поиск с большим лимитом.");
         if (_main.CommunityEnabled && r.Best is not null)

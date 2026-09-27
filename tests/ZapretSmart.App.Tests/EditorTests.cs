@@ -6,6 +6,7 @@ using Avalonia.VisualTree;
 using ZapretSmart.App.ViewModels;
 using ZapretSmart.App.Views;
 using ZapretSmart.Core.Engine;
+using ZapretSmart.Core.Search;
 
 namespace ZapretSmart.App.Tests;
 
@@ -13,11 +14,11 @@ public sealed class EditorTests : IDisposable
 {
     private readonly string _data = Path.Combine(Path.GetTempPath(), "zs-app-tests-" + Guid.NewGuid().ToString("N"));
 
-    private MainWindowViewModel CreateVm()
+    private MainWindowViewModel CreateVm(string? engineExe = null)
     {
         var bin = AppContext.BaseDirectory;
         return new MainWindowViewModel(new AppPaths(
-            Path.Combine(bin, "engine", "winws.exe"),
+            engineExe ?? Path.Combine(bin, "engine", "winws.exe"),
             new EngineLayout(Path.Combine(bin, "engine", "fake"), Path.Combine(_data, "lists"), Path.Combine(_data, "ipsets")),
             Path.Combine(bin, "lists"),
             Path.Combine(bin, "strategies"),
@@ -145,8 +146,8 @@ public sealed class EditorTests : IDisposable
     public void UserStrategyCannotShadowPreset()
     {
         Directory.CreateDirectory(Path.Combine(_data, "strategies"));
-        var preset = File.ReadAllText(Directory.EnumerateFiles(Path.Combine(AppContext.BaseDirectory, "strategies")).First());
-        File.WriteAllText(Path.Combine(_data, "strategies", "dup.json"), preset);
+        var preset = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "strategies", "10-general-multisplit.json"));
+        File.WriteAllText(Path.Combine(_data, "strategies", "general-multisplit.json"), preset);
 
         var vm = CreateVm();
         Assert.Equal(3, vm.Strategies.Count);
@@ -224,6 +225,98 @@ public sealed class EditorTests : IDisposable
     public void RussianPlural(int n, string expected)
     {
         Assert.Equal(expected, BlocklistsViewModel.Plural(n, "домен", "домена", "доменов"));
+    }
+
+    private static SearchResult FoundResult() => new(
+        ["mysite.org", "www.youtube.com"], ["ok.com"], [],
+        new CandidateScore(new Candidate("multisplit", ["dpi-desync=multisplit", "dpi-desync-split-pos=1"]), [], 2, TimeSpan.FromMilliseconds(120), null),
+        false);
+
+    [AvaloniaFact]
+    public void SavedSearchResultCoversTheSitesItWasFoundFor()
+    {
+        var vm = CreateVm();
+        vm.Search.ApplyResult(FoundResult(), ["mysite.org", "www.youtube.com", "ok.com"]);
+        vm.Search.ResultName = "Найдено";
+        vm.Search.SaveResultCommand.Execute(null);
+
+        var saved = vm.Strategies.Single(s => s.Name == "Найдено").Strategy;
+        var ownList = saved.Profiles[0].Hostlists[0];
+        Assert.Equal(saved.Id, ownList);
+        Assert.Equal(["mysite.org", "www.youtube.com"], File.ReadAllLines(Path.Combine(_data, "lists", ownList + ".txt")));
+        Assert.Contains("blocked", saved.Profiles[0].Hostlists);
+        Assert.True(saved.Profiles[0].AutoHostlist);
+        Assert.Same(vm.SelectedStrategy!.Strategy.Id, saved.Id);
+    }
+
+    [AvaloniaFact]
+    public void TooLongResultNameIsReportedNotCrash()
+    {
+        var vm = CreateVm();
+        vm.Search.ApplyResult(FoundResult(), ["mysite.org"]);
+        vm.Search.ResultName = new string('я', 150);
+        vm.Search.SaveResultCommand.Execute(null);
+        Assert.Contains("Не сохранено", vm.Search.Summary);
+        Assert.All(vm.Strategies, s => Assert.True(s.IsPreset));
+    }
+
+    [AvaloniaFact]
+    public void EngineThatCannotStartIsLoggedNotCrash()
+    {
+        // Так выглядит winws.exe, заблокированный антивирусом или повреждённый: Process.Start бросает Win32Exception.
+        Directory.CreateDirectory(_data);
+        var bogus = Path.Combine(_data, "winws.exe");
+        File.WriteAllText(bogus, "not an executable");
+        var vm = CreateVm(bogus);
+        vm.SelectedStrategy = vm.Strategies.First(s => s.Strategy.Id == "discord-voice");
+        vm.StartCommand.Execute(null);
+        Assert.Contains(vm.Log, l => l.Contains("Не удалось запустить движок"));
+        Assert.False(vm.IsRunning);
+    }
+
+    [AvaloniaFact]
+    public void UnsavedDraftSurvivesExternalReload()
+    {
+        var vm = CreateVm();
+        vm.Editor.NewCommand.Execute(null);
+        vm.Editor.Name = "Черновик";
+        vm.ReloadStrategies(null);
+        Assert.Equal("Черновик", vm.Editor.Name);
+        Assert.Null(vm.Editor.EditingId);
+    }
+
+    [AvaloniaFact]
+    public void ReloadWhileRunningKeepsRunningStrategySelected()
+    {
+        var vm = CreateVm();
+        var running = vm.Strategies.First(s => s.Strategy.Id == "discord-voice");
+        vm.SelectedStrategy = running;
+        vm.IsRunning = true;
+
+        vm.Editor.NewCommand.Execute(null);
+        vm.Editor.Name = "Другая";
+        vm.Editor.SaveCommand.Execute(null);
+
+        Assert.Equal("discord-voice", vm.SelectedStrategy!.Strategy.Id);
+        vm.IsRunning = false;
+    }
+
+    [AvaloniaFact]
+    public void BadUserStrategyFileIsShownInEditor()
+    {
+        Directory.CreateDirectory(Path.Combine(_data, "strategies"));
+        File.WriteAllText(Path.Combine(_data, "strategies", "a.json"),
+            """{ "id": "foo", "name": "x", "intercept": { "tcp": "443" }, "profiles": [null] }""");
+        var vm = CreateVm();
+        Assert.Contains(vm.Editor.LoadErrors, e => e.StartsWith("a.json", StringComparison.Ordinal));
+    }
+
+    [AvaloniaFact]
+    public void NothingStartsAfterDispose()
+    {
+        var vm = CreateVm();
+        vm.Dispose();
+        Assert.False(vm.StartCommand.CanExecute(null));
     }
 
     [AvaloniaFact]

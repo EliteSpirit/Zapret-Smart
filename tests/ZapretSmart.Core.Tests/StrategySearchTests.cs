@@ -31,7 +31,8 @@ public class StrategySearchTests
             if (FailStart?.Invoke(c, Starts) == true)
                 throw new EngineStartException("нет прав администратора");
             _active = c;
-            Log.Add(c.Key);
+            // Нормализуем сами, а не через Candidate.Key: тест проверяет именно дедупликацию по ключу.
+            Log.Add(string.Join(' ', args.Order(StringComparer.Ordinal)));
             return Task.FromResult<IAsyncDisposable>(new Stop(() => _active = null));
         }
 
@@ -39,7 +40,7 @@ public class StrategySearchTests
         {
             ct.ThrowIfCancellationRequested();
             var ok = _rules[domain](_active);
-            if (ok && _active is not null && Flaky?.Invoke(_active, Log.Count(k => k == _active.Key)) == true) ok = false;
+            if (ok && _active is not null && Flaky?.Invoke(_active, Log.Count(k => k == string.Join(' ', _active.Args.Order(StringComparer.Ordinal)))) == true) ok = false;
             return Task.FromResult(new ProbeResult(domain, ok, TimeSpan.FromMilliseconds(ok ? 100 + _active?.Args.Count ?? 0 : 0), 0, ok ? null : "таймаут"));
         }
 
@@ -169,6 +170,50 @@ public class StrategySearchTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             search.RunAsync(new SearchOptions { Targets = ["a.com"] }, progress, cts.Token));
         Assert.Equal(1, net.Starts);
+    }
+
+    [Fact]
+    public async Task UnreachableMeansNoCandidateOpenedIt()
+    {
+        // A открывает yt и dc, B открывает только rt: rt не «недоступен по IP», его открыл B.
+        static bool A(Candidate? c) => Is(c, "dpi-desync", "multisplit");
+        static bool B(Candidate? c) => Is(c, "dpi-desync", "multidisorder");
+        var net = new FakeNetwork(new() { ["yt.com"] = A, ["dc.com"] = A, ["rt.org"] = B, ["ip.com"] = _ => false });
+
+        var r = await Run(net, null, "yt.com", "dc.com", "rt.org", "ip.com");
+
+        Assert.True(A(r.Best!.Candidate));
+        Assert.Equal(["rt.org"], r.MissedByBest);
+        Assert.Equal(["ip.com"], r.Unreachable);
+    }
+
+    [Fact]
+    public async Task SameArgumentSetIsNeverTestedTwiceExceptVerification()
+    {
+        static bool Dpi(Candidate? c) => Is(c, "dpi-desync", "fake,multidisorder") && Is(c, "dpi-desync-fooling", "badseq");
+        var net = new FakeNetwork(new() { ["a.com"] = Dpi });
+
+        var r = await Run(net, null, "a.com");
+
+        var repeated = net.Log.GroupBy(k => k).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        Assert.True(repeated.Count <= 1, "повторно проверены: " + string.Join(" | ", repeated));
+        if (repeated.Count == 1) Assert.Equal(string.Join(' ', r.Best!.Candidate.Args.Order(StringComparer.Ordinal)), repeated[0]);
+    }
+
+    [Fact]
+    public void KeyIgnoresArgumentOrder()
+    {
+        Assert.Equal(new Candidate("a", ["x=1", "y=2"]).Key, new Candidate("b", ["y=2", "x=1"]).Key);
+    }
+
+    [Theory]
+    [InlineData("youtube.com", "youtube.com", true)]
+    [InlineData("www.youtube.com", "youtube.com", true)]
+    [InlineData("x.com", "twitter.com", false)]
+    [InlineData("evilyoutube.com", "youtube.com", false)]
+    public void RedirectsAreFollowedOnlyWithinTarget(string host, string domain, bool same)
+    {
+        Assert.Equal(same, HttpsProber.IsSameSite(host, domain));
     }
 
     [Fact]

@@ -195,6 +195,42 @@ public class StrategyValidatorTests
         Assert.False(StrategyLoader.Parse(json, "test").IsValid);
     }
 
+    [Theory]
+    [InlineData("""{ "id": "x", "name": "x", "intercept": { "tcp": "443" }, "profiles": [null] }""")]
+    [InlineData("""{ "id": "x", "name": "x", "intercept": { "tcp": "443" }, "profiles": null }""")]
+    [InlineData("""{ "id": "x", "name": "x", "intercept": null, "profiles": [ { "args": ["dpi-desync=fake"] } ] }""")]
+    [InlineData("""{ "id": "x", "name": null, "intercept": { "tcp": "443" }, "profiles": [ { "args": ["dpi-desync=fake"] } ] }""")]
+    [InlineData("""{ "id": null, "name": "x", "intercept": { "tcp": "443" }, "profiles": [ { "args": ["dpi-desync=fake"] } ] }""")]
+    [InlineData("""{ "id": "x", "name": "x", "intercept": { "tcp": "443" }, "profiles": [ { "args": null } ] }""")]
+    [InlineData("""{ "id": "x", "name": "x", "intercept": { "tcp": "443" }, "profiles": [ { "args": [null] } ] }""")]
+    [InlineData("null")]
+    public void NullShapesAreErrorsNotCrashes(string json)
+    {
+        var l = StrategyLoader.Parse(json, "test");
+        Assert.False(l.IsValid);
+        Assert.NotEmpty(l.Errors);
+    }
+
+    [Fact]
+    public void UserFileNameMustMatchId()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "zs-user-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            const string json = """{ "id": "foo", "name": "x", "intercept": { "tcp": "443" }, "profiles": [ { "args": ["dpi-desync=fake"] } ] }""";
+            File.WriteAllText(Path.Combine(dir, "a.json"), json);
+            File.WriteAllText(Path.Combine(dir, "foo.json"), json);
+            var loaded = StrategyLoader.LoadUserDirectory(dir);
+            Assert.False(loaded.Single(l => l.Source.EndsWith("a.json")).IsValid);
+            Assert.True(loaded.Single(l => l.Source.EndsWith("foo.json")).IsValid);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public void BundledPresetsAreValid()
     {

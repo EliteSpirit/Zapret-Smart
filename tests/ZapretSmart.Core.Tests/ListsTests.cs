@@ -42,17 +42,20 @@ public sealed class ListsTests : IDisposable
             192.168.0.0/16
             127.0.0.1
             192.0.2.0/32
+            2a00:1450:4001::/48
             2a00:1450::/32
             2a00::/16
             fe80::1
             1.2.3
             1.2.3.4/33
+            010.0.0.1
+            1.2.3.256
             not-an-ip
             """);
-        Assert.Equal(["172.217.0.0/16", "198.23.57.168/32", "2a00:1450::/32", "5.6.7.0/24", "5.6.7.8/32"], p.Entries);
-        Assert.Equal(3, p.TooBroad);
+        Assert.Equal(["172.217.0.0/16", "198.23.57.168/32", "2a00:1450:4001::/48", "5.6.7.0/24", "5.6.7.8/32"], p.Entries);
+        Assert.Equal(4, p.TooBroad);
         Assert.Equal(5, p.Reserved);
-        Assert.Equal(3, p.Invalid);
+        Assert.Equal(5, p.Invalid);
     }
 
     private sealed class FakeHttp(Func<Uri, HttpResponseMessage> respond) : HttpMessageHandler
@@ -131,8 +134,33 @@ public sealed class ListsTests : IDisposable
         var r = await u2.UpdateAsync(sub, CancellationToken.None);
 
         Assert.False(r.Updated);
-        Assert.Contains("обрезанную", r.Error);
+        Assert.Contains("часть источников недоступна", r.Error);
         Assert.Equal(100, File.ReadAllLines(u.PathFor(sub)).Length);
+    }
+
+    [Fact]
+    public async Task RealShrinkIsAcceptedWhenAllSourcesAnswered()
+    {
+        // Раньше «меньше половины» блокировало обновления навсегда, даже когда источники честно сократили список.
+        var (u, sub) = Setup(_ => Ok(Domains(100)), minA: 10, minB: 10);
+        await u.UpdateAsync(sub, CancellationToken.None);
+
+        var (u2, _) = Setup(url => Ok(url.Host == "a.test" ? Domains(30) : Domains(10, "x")), minA: 10, minB: 10);
+        var r = await u2.UpdateAsync(sub, CancellationToken.None);
+
+        Assert.True(r.Updated, r.Error);
+        Assert.Equal(40, File.ReadAllLines(u.PathFor(sub)).Length);
+    }
+
+    [Fact]
+    public async Task WriteFailureIsReportedNotThrown()
+    {
+        var (u, sub) = Setup(_ => Ok(Domains(20)));
+        Directory.CreateDirectory(u.PathFor(sub));
+        var r = await u.UpdateAsync(sub, CancellationToken.None);
+        Assert.False(r.Updated);
+        Assert.Contains("не удалось записать", r.Error);
+        Assert.False(File.Exists(u.PathFor(sub) + ".tmp"));
     }
 
     [Fact]

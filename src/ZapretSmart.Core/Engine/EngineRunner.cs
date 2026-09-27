@@ -39,7 +39,23 @@ public sealed class EngineRunner(string executablePath) : IDisposable
             var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
             p.OutputDataReceived += (_, e) => { if (e.Data is not null) Output?.Invoke(e.Data); };
             p.ErrorDataReceived += (_, e) => { if (e.Data is not null) Output?.Invoke(e.Data); };
-            p.Exited += (_, _) => Exited?.Invoke(p.ExitCode);
+            p.Exited += (_, _) =>
+            {
+                int code;
+                try
+                {
+                    // Exited приходит раньше, чем дочитан перенаправленный вывод. WaitForExit() без таймаута
+                    // ждёт конца потоков: иначе последняя строка движка (причина падения) терялась бы.
+                    p.WaitForExit();
+                    code = p.ExitCode;
+                }
+                catch (InvalidOperationException)
+                {
+                    // Dispose уже освободил процесс; исключение в пуле потоков уронило бы приложение.
+                    return;
+                }
+                Exited?.Invoke(code);
+            };
 
             p.Start();
             p.BeginOutputReadLine();

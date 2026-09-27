@@ -12,6 +12,8 @@ namespace ZapretSmart.Core.Search;
 /// </summary>
 public sealed class HttpsProber(TimeSpan timeout, int minBytes = 64 * 1024, bool useProxy = false) : IProber
 {
+    public const int MaxRedirects = 3;
+
     private static readonly ProductInfoHeaderValue UserAgent = new("Mozilla", "5.0");
 
     public async Task<ProbeResult> ProbeAsync(string domain, CancellationToken ct)
@@ -22,8 +24,7 @@ public sealed class HttpsProber(TimeSpan timeout, int minBytes = 64 * 1024, bool
         {
             PooledConnectionLifetime = TimeSpan.Zero,
             ConnectTimeout = timeout,
-            AllowAutoRedirect = true,
-            MaxAutomaticRedirections = 3,
+            AllowAutoRedirect = false,
             UseProxy = useProxy,
         };
         using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
@@ -32,16 +33,34 @@ public sealed class HttpsProber(TimeSpan timeout, int minBytes = 64 * 1024, bool
 
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get, $"https://{domain}/");
-            req.Headers.UserAgent.Add(UserAgent);
-            req.Headers.ConnectionClose = true;
-            using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
-            await using var body = await resp.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
-            var buf = new byte[16 * 1024];
-            int n;
-            while (total < minBytes && (n = await body.ReadAsync(buf, cts.Token).ConfigureAwait(false)) > 0)
-                total += n;
-            return new ProbeResult(domain, true, sw.Elapsed, total, null);
+            var url = new Uri($"https://{domain}/");
+            for (var hop = 0; ; hop++)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.UserAgent.Add(UserAgent);
+                req.Headers.ConnectionClose = true;
+                using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+
+                // Обход в движке включён только для доменов цели. Редирект на чужой домен (twitter.com -> x.com)
+                // шёл бы без обхода и выглядел бы как провал кандидата, поэтому за пределы цели не ходим:
+                // ответ от самой цели уже означает, что запрос прошёл через DPI.
+                if ((int)resp.StatusCode is >= 300 and < 400 && resp.Headers.Location is { } location && hop < MaxRedirects)
+                {
+                    var next = location.IsAbsoluteUri ? location : new Uri(url, location);
+                    if (next.Scheme == Uri.UriSchemeHttps && IsSameSite(next.Host, domain))
+                    {
+                        url = next;
+                        continue;
+                    }
+                }
+
+                await using var body = await resp.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
+                var buf = new byte[16 * 1024];
+                int n;
+                while (total < minBytes && (n = await body.ReadAsync(buf, cts.Token).ConfigureAwait(false)) > 0)
+                    total += n;
+                return new ProbeResult(domain, true, sw.Elapsed, total, null);
+            }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -52,4 +71,9 @@ public sealed class HttpsProber(TimeSpan timeout, int minBytes = 64 * 1024, bool
             return new ProbeResult(domain, false, sw.Elapsed, total, e.GetBaseException().Message);
         }
     }
+
+    /// <summary>Тот же домен или его поддомен: такие имена покрывает hostlist цели.</summary>
+    public static bool IsSameSite(string host, string domain) =>
+        host.Equals(domain, StringComparison.OrdinalIgnoreCase)
+        || host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
 }

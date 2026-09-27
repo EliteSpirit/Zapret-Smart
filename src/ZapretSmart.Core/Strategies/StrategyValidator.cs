@@ -40,7 +40,10 @@ public static class StrategyValidator
         else
         {
             for (var i = 0; i < s.Profiles.Count; i++)
-                ValidateProfile(s.Profiles[i], $"Профиль {i + 1}", errors);
+            {
+                if (s.Profiles[i] is null) errors.Add($"Профиль {i + 1}: пустой");
+                else ValidateProfile(s.Profiles[i], $"Профиль {i + 1}", errors);
+            }
         }
 
         return errors;

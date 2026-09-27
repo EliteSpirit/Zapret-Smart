@@ -122,6 +122,18 @@ public sealed class WinwsEngineHostTests : IDisposable
         Assert.Equal(["--wf-tcp=443", "--hostlist=" + Path.Combine(_dir, "lists", SearchOptions.TargetsListId + ".txt"), "--hostlist-domains=" + EngineCommandBuilder.GuardDomain, "--filter-tcp=443", "--dpi-desync=multisplit"], lines);
     }
 
+    [UnixFact]
+    public async Task EngineThatCannotBeExecutedIsStartFailure()
+    {
+        // Так выглядит блокировка антивирусом или битый файл: Process.Start бросает Win32Exception.
+        var exe = Path.Combine(_dir, "not-executable");
+        File.WriteAllText(exe, "garbage");
+        using var host = new WinwsEngineHost(exe,
+            new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(_dir, "lists"), Path.Combine(_dir, "ipsets")), TimeSpan.FromSeconds(1));
+        var e = await Assert.ThrowsAsync<EngineStartException>(() => host.StartAsync(Probe, CancellationToken.None));
+        Assert.Contains("не удалось запустить движок", e.Message);
+    }
+
     [Fact]
     public async Task MissingExecutableIsNotSwallowed()
     {

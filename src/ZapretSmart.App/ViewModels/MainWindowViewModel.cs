@@ -26,6 +26,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly EngineRunner _runner;
     private AppSettings _settings;
     private bool _stopRequested;
+    private bool _disposed;
 
     public MainWindowViewModel(AppPaths paths)
     {
@@ -96,7 +97,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnIsSearchingChanged(bool value) => UpdateStatus();
 
-    private bool CanStart() => IsWindows && !IsRunning && !IsSearching && SelectedStrategy is not null;
+    // После Dispose ничего не запускаем: иначе движок остался бы работать без окна.
+    private bool CanStart() => !_disposed && IsWindows && !IsRunning && !IsSearching && SelectedStrategy is not null;
 
     [RelayCommand(CanExecute = nameof(CanStart))]
     private void Start()
@@ -117,6 +119,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         catch (FileNotFoundException)
         {
             AppendLog("! Не найден движок: " + Paths.EngineExe);
+        }
+        catch (System.ComponentModel.Win32Exception e)
+        {
+            AppendLog("! Не удалось запустить движок: " + e.Message + ". Приложение запущено от администратора? Не заблокировал ли winws.exe антивирус?");
         }
         UpdateStatus();
     }
@@ -140,6 +146,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void ReloadStrategies(string? selectId)
     {
+        // Пока обход работает, выбранной остаётся запущенная стратегия: иначе на главной показывалась бы не та, что работает.
+        if (IsRunning) selectId = SelectedStrategy?.Strategy.Id;
         selectId ??= SelectedStrategy?.Strategy.Id ?? _settings.SelectedStrategyId;
         Strategies.Clear();
         LoadErrors.Clear();
@@ -147,7 +155,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var presets = StrategyLoader.LoadDirectory(Paths.PresetsDir);
         var presetIds = presets.Where(l => l.IsValid).Select(l => l.Strategy!.Id).ToHashSet();
         var loaded = presets.Select(l => (l, preset: true))
-            .Concat(StrategyLoader.LoadDirectory(Paths.UserStrategiesDir).Select(l => (l, preset: false)));
+            .Concat(StrategyLoader.LoadUserDirectory(Paths.UserStrategiesDir).Select(l => (l, preset: false)));
 
         foreach (var (l, preset) in loaded)
         {
@@ -213,6 +221,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         Search.Dispose();
         _runner.Dispose();
     }

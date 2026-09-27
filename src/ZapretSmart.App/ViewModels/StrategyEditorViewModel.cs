@@ -107,6 +107,7 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
     public ObservableCollection<string> Errors { get; } = [];
 
     public ObservableCollection<StrategyItem> Items => _main.Strategies;
+    public ObservableCollection<string> LoadErrors => _main.LoadErrors;
 
     [ObservableProperty]
     private StrategyItem? _selectedItem;
@@ -159,7 +160,8 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
         var match = items.FirstOrDefault(i => i.Strategy.Id == EditingId);
         if (match is not null)
             SelectSilently(match);
-        else if (EditingId is not null || SelectedItem is null)
+        else if (!(EditingId is null && IsDirty))
+            // Несохранённый черновик («Новая»/«Копия») не выбрасываем, когда список перечитывается извне.
             SelectedItem = items.FirstOrDefault();
     }
 
@@ -274,6 +276,8 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
         }
         EditingId = id;
         IsDirty = false;
+        if (_main.IsRunning && _main.SelectedStrategy?.Strategy.Id == id)
+            _main.AppendLog("Стратегия сохранена. Изменения применятся после перезапуска обхода.");
         _main.ReloadStrategies(id);
     }
 
@@ -286,12 +290,13 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
         {
             _main.UserStrategies.Delete(EditingId!);
         }
-        catch (IOException e)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             Errors.Add("Не удалено: " + e.Message);
             return;
         }
         EditingId = null;
+        IsDirty = false;
         SelectSilently(null);
         _main.ReloadStrategies(null);
     }

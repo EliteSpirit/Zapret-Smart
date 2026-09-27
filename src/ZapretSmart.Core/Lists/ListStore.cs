@@ -44,6 +44,15 @@ public sealed class ListStore(EngineLayout layout, string bundledDir)
         .Order(StringComparer.Ordinal)
         .ToList();
 
+    /// <summary>Свой список доменов. Подписки и служебные списки так не перезаписать.</summary>
+    public void WriteHostlist(string id, IEnumerable<string> domains)
+    {
+        if (!StrategyValidator.IsValidListId(id) || Subscriptions.IsSubscription(id) || id is EngineLayout.AutoListId or EngineLayout.ExcludeListId)
+            throw new ArgumentException($"список '{id}' нельзя перезаписать", nameof(id));
+        System.IO.Directory.CreateDirectory(layout.ListsDir);
+        File.WriteAllLines(layout.HostlistPath(id), domains);
+    }
+
     public int AutoListCount() =>
         File.Exists(layout.HostlistPath(EngineLayout.AutoListId))
             ? File.ReadLines(layout.HostlistPath(EngineLayout.AutoListId)).Count(l => l.Trim().Length > 0)

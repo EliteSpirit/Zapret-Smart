@@ -31,8 +31,11 @@ public sealed record SearchResult(
     CandidateScore? Best,
     bool BudgetExhausted)
 {
-    /// <summary>Цели, которые не открылись и с лучшим кандидатом: вероятно, блокировка по IP или подмена DNS.</summary>
-    public IReadOnlyList<string> Unreachable => Best?.Failed ?? Blocked;
+    /// <summary>Цели, которые не открыл ни один кандидат: вероятно, блокировка по IP или подмена DNS.</summary>
+    public IReadOnlyList<string> Unreachable => Blocked.Where(t => Ranking.All(s => s.Failed.Contains(t))).ToList();
+
+    /// <summary>Цели, которые не открылись с лучшим кандидатом, хотя их открывал какой-то другой.</summary>
+    public IReadOnlyList<string> MissedByBest => Best is null ? [] : Best.Failed.Except(Unreachable).ToList();
 }
 
 public sealed class SearchAbortedException(string message) : Exception(message);

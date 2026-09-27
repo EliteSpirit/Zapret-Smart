@@ -18,9 +18,10 @@ public static class ListParser
     /// <summary>
     /// Подсети крупнее /16 (больше 65 536 адресов) отбрасываются. В реальных списках там Cloudflare (104.16.0.0/12)
     /// и Google (142.250.0.0/15): обход на них ломал бы тысячи незаблокированных сайтов.
+    /// Для IPv6 порог /48 (выделение одной площадке): /32 — это целиком сеть провайдера, например 2a00:1450::/32 у Google.
     /// </summary>
     public const int MinPrefixV4 = 16;
-    public const int MinPrefixV6 = 32;
+    public const int MinPrefixV6 = 48;
 
     private static readonly (IPAddress Net, int Prefix)[] ReservedNets =
     [
@@ -95,7 +96,10 @@ public static class ListParser
             return false;
         if (!IPAddress.TryParse(addrPart, out var addr)) return false;
         if (addr.AddressFamily is not (AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)) return false;
-        if (addr.AddressFamily == AddressFamily.InterNetwork && addrPart.Count(c => c == '.') != 3) return false;
+        // IPAddress.TryParse читает "010.0.0.1" как восьмеричное 8.0.0.1; в списках такое — опечатка, а не намерение.
+        if (addr.AddressFamily == AddressFamily.InterNetwork
+            && (addrPart.Count(c => c == '.') != 3 || addrPart.Split('.').Any(o => o.Length == 0 || o.Length > 3 || (o.Length > 1 && o[0] == '0') || !o.All(char.IsAsciiDigit))))
+            return false;
 
         var max = addr.AddressFamily == AddressFamily.InterNetwork ? 32 : 128;
         prefix = max;

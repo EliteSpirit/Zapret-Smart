@@ -5,7 +5,8 @@ namespace ZapretSmart.Core.Search;
 /// <summary>Параметры TLS-профиля (tcp/443), которые проверяются как одна стратегия.</summary>
 public sealed record Candidate(string Label, IReadOnlyList<string> Args)
 {
-    public string Key => string.Join(' ', Args);
+    /// <summary>Ключ не зависит от порядка опций: With() переносит заменённую опцию в конец, а движку порядок здесь не важен.</summary>
+    public string Key => string.Join(' ', Args.Order(StringComparer.Ordinal));
 
     public string? Get(string option) =>
         Args.Select(a => a.Split('=', 2)).FirstOrDefault(p => p[0] == option) is { } p ? (p.Length > 1 ? p[1] : "") : null;
