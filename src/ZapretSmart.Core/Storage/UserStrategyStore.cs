@@ -30,30 +30,3 @@ public sealed class UserStrategyStore(string dir)
         File.Delete(PathFor(id));
     }
 }
-
-public sealed class ListStore(string userDir, string bundledDir)
-{
-    public string Directory { get; } = userDir;
-
-    /// <summary>Копирует встроенные списки, которых ещё нет у пользователя. Правки пользователя не перезаписываются.</summary>
-    public void SeedMissing()
-    {
-        if (!System.IO.Directory.Exists(bundledDir)) return;
-        System.IO.Directory.CreateDirectory(Directory);
-        foreach (var src in System.IO.Directory.EnumerateFiles(bundledDir, "*.txt"))
-        {
-            var dst = Path.Combine(Directory, Path.GetFileName(src));
-            if (!File.Exists(dst)) File.Copy(src, dst);
-        }
-    }
-
-    public IReadOnlyList<string> Ids() =>
-        System.IO.Directory.Exists(Directory)
-            ? System.IO.Directory.EnumerateFiles(Directory, "*.txt")
-                .Select(Path.GetFileNameWithoutExtension)
-                .OfType<string>()
-                .Where(StrategyValidator.IsValidListId)
-                .Order(StringComparer.Ordinal)
-                .ToList()
-            : [];
-}

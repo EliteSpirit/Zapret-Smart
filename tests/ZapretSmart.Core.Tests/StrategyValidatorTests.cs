@@ -143,14 +143,33 @@ public class StrategyValidatorTests
         Assert.NotEmpty(StrategyValidator.Validate(WithArgs("dpi-desync=fake", "dpi-desync-fake-quic=" + value)));
     }
 
-    [Fact]
-    public void HostlistMustBeIdNotPath()
+    [Theory]
+    [InlineData("..\\..\\hosts")]
+    [InlineData("C:\\Windows\\hosts")]
+    [InlineData("general.txt")]
+    [InlineData("")]
+    public void ListNamesMustBeIdsNotPaths(string bad)
     {
-        var s = WithArgs("dpi-desync=fake") with
+        Assert.NotEmpty(StrategyValidator.Validate(WithArgs("dpi-desync=fake") with
         {
-            Profiles = [new Profile { Hostlist = "..\\..\\hosts", Args = ["dpi-desync=fake"] }],
-        };
-        Assert.NotEmpty(StrategyValidator.Validate(s));
+            Profiles = [new Profile { Hostlists = ["general", bad], Args = ["dpi-desync=fake"] }],
+        }));
+        Assert.NotEmpty(StrategyValidator.Validate(WithArgs("dpi-desync=fake") with
+        {
+            Profiles = [new Profile { Ipsets = [bad], Args = ["dpi-desync=fake"] }],
+        }));
+    }
+
+    [Fact]
+    public void NullListArraysFromJsonAreRejected()
+    {
+        const string json = """
+            { "id": "x", "name": "x", "intercept": { "tcp": "443" },
+              "profiles": [ { "hostlists": null, "ipsets": [null], "args": ["dpi-desync=fake"] } ] }
+            """;
+        var l = StrategyLoader.Parse(json, "test");
+        Assert.False(l.IsValid);
+        Assert.Equal(2, l.Errors.Count);
     }
 
     [Fact]

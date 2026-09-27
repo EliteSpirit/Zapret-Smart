@@ -46,12 +46,24 @@ public static class StrategyValidator
         return errors;
     }
 
+    public const int MaxListsPerProfile = 8;
+
     public static bool IsValidListId(string id) => IdRe.IsMatch(id);
+
+    private static void ValidateListIds(IReadOnlyList<string>? ids, string path, List<string> errors)
+    {
+        if (ids is null)
+            errors.Add($"{path}: должен быть массив имён");
+        else if (ids.Count > MaxListsPerProfile)
+            errors.Add($"{path}: не больше {MaxListsPerProfile}");
+        else if (ids.Any(id => id is null || !IsValidListId(id)))
+            errors.Add($"{path}: '{ids.First(id => id is null || !IsValidListId(id)) ?? "null"}' — ожидается имя списка (a-z, 0-9, '-', '_'), а не путь");
+    }
 
     private static void ValidateProfile(Profile p, string path, List<string> errors)
     {
-        if (p.Hostlist is not null && !IsValidListId(p.Hostlist))
-            errors.Add($"{path}, список доменов: ожидается имя списка, а не путь");
+        ValidateListIds(p.Hostlists, $"{path}, списки доменов", errors);
+        ValidateListIds(p.Ipsets, $"{path}, списки IP", errors);
 
         if (p.Args is null || p.Args.Count == 0)
         {

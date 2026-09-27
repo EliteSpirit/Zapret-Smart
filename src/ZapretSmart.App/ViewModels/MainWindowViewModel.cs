@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ZapretSmart.Core.Engine;
+using ZapretSmart.Core.Lists;
 using ZapretSmart.Core.Settings;
 using ZapretSmart.Core.Storage;
 using ZapretSmart.Core.Strategies;
@@ -33,11 +34,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _settings = _settingsStore.Load();
         _communityEnabled = _settings.CommunityEnabled;
 
-        Lists = new ListStore(paths.Layout.ListsDir, paths.BundledListsDir);
+        ListStore = new ListStore(paths.Layout, paths.BundledListsDir);
         UserStrategies = new UserStrategyStore(paths.UserStrategiesDir);
         try
         {
-            Lists.SeedMissing();
+            ListStore.SeedMissing();
         }
         catch (IOException e)
         {
@@ -48,6 +49,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _runner.Output += line => Dispatcher.UIThread.Post(() => AppendLog(line));
         _runner.Exited += code => Dispatcher.UIThread.Post(() => OnEngineExited(code));
 
+        Blocklists = new BlocklistsViewModel(this, new ListUpdater(ListUpdater.CreateHttpClient(), paths.Layout.ListsDir, paths.Layout.IpsetsDir));
         Editor = new StrategyEditorViewModel(this);
         Search = new SearchViewModel(this);
 
@@ -56,7 +58,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public AppPaths Paths { get; }
-    public ListStore Lists { get; }
+    public ListStore ListStore { get; }
+    public BlocklistsViewModel Blocklists { get; }
     public UserStrategyStore UserStrategies { get; }
     public StrategyEditorViewModel Editor { get; }
     public SearchViewModel Search { get; }
@@ -100,10 +103,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var argv = EngineCommandBuilder.Build(SelectedStrategy!.Strategy, Paths.Layout);
-            AppendLog("> winws " + string.Join(' ', argv));
+            var cmd = EngineCommandBuilder.Build(SelectedStrategy!.Strategy, Paths.Layout);
+            foreach (var w in cmd.Warnings) AppendLog("! " + w);
+            AppendLog("> winws " + string.Join(' ', cmd.Argv));
             _stopRequested = false;
-            _runner.Start(argv);
+            _runner.Start(cmd.Argv);
             IsRunning = true;
         }
         catch (StrategyRejectedException e)
@@ -166,9 +170,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void OpenListsFolder()
     {
         if (!IsWindows) return;
-        Directory.CreateDirectory(Lists.Directory);
-        Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { Lists.Directory } });
+        Directory.CreateDirectory(ListStore.Directory);
+        Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { ListStore.Directory } });
     }
+
+    /// <summary>Фоновые задачи после показа окна. Не из конструктора: тесты создают модель без сети.</summary>
+    public void StartBackgroundWork() => _ = Blocklists.UpdateStaleAsync();
 
     public void AppendLog(string line)
     {

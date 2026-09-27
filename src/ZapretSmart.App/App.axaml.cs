@@ -17,6 +17,7 @@ public partial class App : Application
             var vm = new MainWindowViewModel(AppPaths.Default);
             desktop.MainWindow = new MainWindow { DataContext = vm };
             desktop.Exit += (_, _) => vm.Dispose();
+            vm.StartBackgroundWork();
         }
         base.OnFrameworkInitializationCompleted();
     }

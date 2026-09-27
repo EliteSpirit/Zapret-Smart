@@ -1,11 +1,17 @@
 {
   "id": "general-multisplit",
   "name": "Общая: fake + multisplit",
-  "description": "YouTube/Discord и прочее из списка general. TLS: фейк + разрез по midsld, HTTP: autottl, QUIC: фейковый initial.",
-  "intercept": { "tcp": "80,443", "udp": "443" },
+  "description": "Сайты из списков general и blocked (обновляется сам) плюс домены, которые движок сам распознал как заблокированные. TLS: фейк + разрез по midsld, HTTP: autottl, QUIC: фейковый initial.",
+  "intercept": {
+    "tcp": "80,443",
+    "udp": "443"
+  },
   "profiles": [
     {
-      "hostlist": "general",
+      "hostlists": [
+        "general",
+        "blocked"
+      ],
       "args": [
         "filter-udp=443",
         "dpi-desync=fake",
@@ -14,7 +20,11 @@
       ]
     },
     {
-      "hostlist": "general",
+      "hostlists": [
+        "general",
+        "blocked"
+      ],
+      "autoHostlist": true,
       "args": [
         "filter-tcp=80",
         "dpi-desync=fake,multisplit",
@@ -23,7 +33,11 @@
       ]
     },
     {
-      "hostlist": "general",
+      "hostlists": [
+        "general",
+        "blocked"
+      ],
+      "autoHostlist": true,
       "args": [
         "filter-tcp=443",
         "dpi-desync=fake,multisplit",

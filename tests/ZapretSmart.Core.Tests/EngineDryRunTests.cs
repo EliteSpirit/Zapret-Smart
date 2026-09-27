@@ -14,9 +14,21 @@ public class EngineDryRunTests
 {
     private static readonly string? Engine = Environment.GetEnvironmentVariable("ZS_ENGINE");
 
-    private static readonly EngineLayout Layout = new(
-        Path.Combine(AppContext.BaseDirectory, "fake"),
-        Path.Combine(AppContext.BaseDirectory, "lists"));
+    private static readonly EngineLayout Layout = CreateLayout();
+
+    private static EngineLayout CreateLayout()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "zs-dryrun-" + Environment.ProcessId);
+        var layout = new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(dir, "lists"), Path.Combine(dir, "ipsets"));
+        Directory.CreateDirectory(layout.ListsDir);
+        Directory.CreateDirectory(layout.IpsetsDir);
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "lists", "general.txt"), layout.HostlistPath("general"), overwrite: true);
+        File.WriteAllLines(layout.HostlistPath("blocked"), ["rutracker.org", "xn--80ak6aa92e.xn--p1ai"]);
+        File.WriteAllText(layout.HostlistPath(EngineLayout.ExcludeListId), "");
+        File.WriteAllText(layout.HostlistPath(EngineLayout.AutoListId), "");
+        File.WriteAllLines(layout.IpsetPath("blocked-ip"), ["203.0.113.0/24", "2001:db8:1::/48"]);
+        return layout;
+    }
 
     public sealed class EngineTheoryAttribute : TheoryAttribute
     {
@@ -41,7 +53,7 @@ public class EngineDryRunTests
     public void PresetIsAcceptedByEngine(string file)
     {
         var loaded = StrategyLoader.LoadFile(Path.Combine(AppContext.BaseDirectory, "presets", file));
-        AssertEngineAccepts(EngineCommandBuilder.Build(loaded.Strategy!, Layout));
+        AssertEngineAccepts(EngineCommandBuilder.Build(loaded.Strategy!, Layout).Argv);
     }
 
     [EngineTheory]
@@ -55,7 +67,7 @@ public class EngineDryRunTests
             Intercept = new Intercept { Tcp = "443" },
             Profiles = [new Profile { Args = ["dpi-desync=fake", arg] }],
         };
-        AssertEngineAccepts(EngineCommandBuilder.Build(s, Layout));
+        AssertEngineAccepts(EngineCommandBuilder.Build(s, Layout).Argv);
     }
 
     [EngineTheory]
@@ -64,7 +76,24 @@ public class EngineDryRunTests
     {
         _ = label;
         var c = new Candidate(label, args.Split('\n'));
-        AssertEngineAccepts(EngineCommandBuilder.Build(CandidateGenerator.ToStrategy(c, "t", "t", "general", ""), Layout));
+        AssertEngineAccepts(EngineCommandBuilder.Build(CandidateGenerator.ToStrategy(c, "t", "t", ["general", "blocked"], true, ""), Layout).Argv);
+    }
+
+    [EngineTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ListOptionsAreAcceptedByEngine(bool withMissingLists)
+    {
+        var s = EngineCommandBuilderTests.One(new Profile
+        {
+            Hostlists = withMissingLists ? ["general", "blocked", "not-downloaded"] : ["general", "blocked"],
+            Ipsets = withMissingLists ? ["blocked-ip", "not-downloaded"] : ["blocked-ip"],
+            AutoHostlist = true,
+            Args = ["filter-tcp=443", "dpi-desync=multisplit"],
+        });
+        var cmd = EngineCommandBuilder.Build(s, Layout);
+        Assert.Equal(withMissingLists ? 2 : 0, cmd.Warnings.Count);
+        AssertEngineAccepts(cmd.Argv);
     }
 
     private static void AssertEngineAccepts(IReadOnlyList<string> argv)

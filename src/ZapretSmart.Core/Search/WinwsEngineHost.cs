@@ -13,7 +13,7 @@ public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, 
 
     public async Task<IAsyncDisposable> StartAsync(Strategy strategy, CancellationToken ct)
     {
-        var argv = EngineCommandBuilder.Build(strategy, layout);
+        var argv = EngineCommandBuilder.Build(strategy, layout).Argv;
         var runner = new EngineRunner(executablePath);
         var output = new ConcurrentQueue<string>();
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

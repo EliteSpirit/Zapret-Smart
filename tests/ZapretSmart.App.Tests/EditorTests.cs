@@ -18,7 +18,7 @@ public sealed class EditorTests : IDisposable
         var bin = AppContext.BaseDirectory;
         return new MainWindowViewModel(new AppPaths(
             Path.Combine(bin, "engine", "winws.exe"),
-            new EngineLayout(Path.Combine(bin, "engine", "fake"), Path.Combine(_data, "lists")),
+            new EngineLayout(Path.Combine(bin, "engine", "fake"), Path.Combine(_data, "lists"), Path.Combine(_data, "ipsets")),
             Path.Combine(bin, "lists"),
             Path.Combine(bin, "strategies"),
             Path.Combine(_data, "strategies"),
@@ -55,8 +55,11 @@ public sealed class EditorTests : IDisposable
     public void BundledListsAreCopiedToUserFolder()
     {
         var vm = CreateVm();
-        Assert.Contains("general", vm.Lists.Ids());
-        Assert.StartsWith(_data, vm.Lists.Directory);
+        Assert.Equal(["blocked", "general"], vm.ListStore.HostlistIds());
+        Assert.Equal(["blocked-ip"], vm.ListStore.IpsetIds());
+        Assert.StartsWith(_data, vm.ListStore.Directory);
+        Assert.True(File.Exists(Path.Combine(_data, "lists", "general.txt")));
+        Assert.True(File.Exists(Path.Combine(_data, "lists", "exclude.txt")));
     }
 
     [AvaloniaFact]
@@ -110,12 +113,15 @@ public sealed class EditorTests : IDisposable
 
         ed.NewCommand.Execute(null);
         ed.Name = "Тестовая";
-        ed.Profiles[0].Hostlist = ed.ListChoices.Single(c => c.Id == "general");
+        ed.Profiles[0].HostToggles.Single(t => t.Id == "blocked").IsChecked = false;
+        ed.Profiles[0].IpToggles.Single(t => t.Id == "blocked-ip").IsChecked = true;
         ed.SaveCommand.Execute(null);
 
         var saved = vm.Strategies.Single(s => s.Name == "Тестовая");
         Assert.False(saved.IsPreset);
-        Assert.Equal("general", saved.Strategy.Profiles[0].Hostlist);
+        Assert.Equal(["general"], saved.Strategy.Profiles[0].Hostlists);
+        Assert.Equal(["blocked-ip"], saved.Strategy.Profiles[0].Ipsets);
+        Assert.True(saved.Strategy.Profiles[0].AutoHostlist);
         Assert.True(File.Exists(vm.UserStrategies.PathFor(saved.Strategy.Id)));
         Assert.Same(saved, ed.SelectedItem);
         Assert.False(ed.SaveCommand.CanExecute(null));
@@ -145,6 +151,79 @@ public sealed class EditorTests : IDisposable
         var vm = CreateVm();
         Assert.Equal(3, vm.Strategies.Count);
         Assert.Contains(vm.LoadErrors, e => e.Contains("занят встроенной"));
+    }
+
+    [AvaloniaFact]
+    public void NewProfileDefaultsToBlockedListsAndAutoList()
+    {
+        var ed = CreateVm().Editor;
+        ed.NewCommand.Execute(null);
+        var p = ed.Profiles[0];
+        Assert.Equal(["blocked", "general"], p.HostToggles.Where(t => t.IsChecked).Select(t => t.Id));
+        Assert.True(p.AutoHostlist);
+        Assert.Equal("", p.ScopeHint);
+    }
+
+    [AvaloniaFact]
+    public void ProfileWithoutListsWarnsAboutAllTraffic()
+    {
+        var ed = CreateVm().Editor;
+        ed.NewCommand.Execute(null);
+        var p = ed.Profiles[0];
+        foreach (var t in p.HostToggles) t.IsChecked = false;
+        p.AutoHostlist = false;
+        Assert.Contains("ко всему трафику", p.ScopeHint);
+        p.IpToggles[0].IsChecked = true;
+        Assert.Equal("", p.ScopeHint);
+    }
+
+    [AvaloniaFact]
+    public void PresetListsAreShownAsChecked()
+    {
+        var ed = CreateVm().Editor;
+        ed.SelectedItem = ed.Items.First(i => i.Strategy.Id == "general-multisplit");
+        Assert.All(ed.Profiles, p => Assert.Equal(["blocked", "general"], p.HostToggles.Where(t => t.IsChecked).Select(t => t.Id)));
+        Assert.True(ed.Profiles[2].AutoHostlist);
+    }
+
+    [AvaloniaFact]
+    public void BlocklistsShowStatusAndAutoListCanBeCleared()
+    {
+        var vm = CreateVm();
+        Assert.All(vm.Blocklists.Items, i => Assert.Equal("ещё не загружен", i.Info));
+        Assert.Equal("Автосписок пуст", vm.Blocklists.AutoInfo);
+
+        File.WriteAllText(Path.Combine(_data, "lists", "auto.txt"), "a.com\nb.com\n");
+        vm.Blocklists.RefreshAutoCommand.Execute(null);
+        Assert.Equal("В автосписке 2 домена", vm.Blocklists.AutoInfo);
+        vm.Blocklists.ClearAutoCommand.Execute(null);
+        Assert.Equal("Автосписок пуст", vm.Blocklists.AutoInfo);
+        Assert.Equal("", File.ReadAllText(Path.Combine(_data, "lists", "auto.txt")));
+    }
+
+    [AvaloniaFact]
+    public void StartWarnsAboutListsNotYetDownloaded()
+    {
+        var vm = CreateVm();
+        vm.SelectedStrategy = vm.Strategies.First(s => s.Strategy.Id == "general-multisplit");
+        vm.StartCommand.Execute(null);
+        Assert.Contains(vm.Log, l => l.Contains("список доменов 'blocked' ещё не загружен"));
+        Assert.Contains(vm.Log, l => l.StartsWith("> winws", StringComparison.Ordinal) && l.Contains("--hostlist-domains=zapret-smart.invalid"));
+        Assert.False(vm.IsRunning);
+    }
+
+    [Theory]
+    [InlineData(1, "1 домен")]
+    [InlineData(2, "2 домена")]
+    [InlineData(5, "5 доменов")]
+    [InlineData(11, "11 доменов")]
+    [InlineData(14, "14 доменов")]
+    [InlineData(21, "21 домен")]
+    [InlineData(112, "112 доменов")]
+    [InlineData(81187, "81\u00a0187 доменов")]
+    public void RussianPlural(int n, string expected)
+    {
+        Assert.Equal(expected, BlocklistsViewModel.Plural(n, "домен", "домена", "доменов"));
     }
 
     [AvaloniaFact]

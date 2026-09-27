@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ZapretSmart.Core.Community;
+using ZapretSmart.Core.Lists;
 using ZapretSmart.Core.Search;
 using ZapretSmart.Core.Storage;
 using ZapretSmart.Core.Strategies;
@@ -93,7 +94,7 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
             Directory.CreateDirectory(_tempDir);
             await File.WriteAllLinesAsync(Path.Combine(_tempDir, SearchOptions.TargetsListId + ".txt"), targets);
 
-            var layout = _main.Paths.Layout with { ListsDir = _tempDir };
+            var layout = _main.Paths.Layout with { ListsDir = _tempDir, IpsetsDir = _tempDir };
             _host = new WinwsEngineHost(_main.Paths.EngineExe, layout, EngineReadyTimeout);
             var search = new StrategySearch(_host, new HttpsProber(ProbeTimeout));
             var progress = new Progress<SearchProgress>(OnProgress);
@@ -135,10 +136,9 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     private void SaveResult()
     {
         var name = string.IsNullOrWhiteSpace(ResultName) ? "Найденная стратегия" : ResultName.Trim();
-        var hostlist = _main.Lists.Ids().Contains("general") ? "general" : null;
         var id = UserStrategyStore.NewId();
-        var s = CandidateGenerator.ToStrategy(Best!.Candidate, id, name, hostlist,
-            $"Найдена поиском {DateTime.Now:dd.MM.yyyy}: {Best.Passed}/{Best.Total} целей, {Best.MedianLatency.TotalMilliseconds:0} мс. {Best.Candidate.Label}. QUIC не перехватывается.");
+        var s = CandidateGenerator.ToStrategy(Best!.Candidate, id, name, ["general", Subscriptions.BlockedDomains.Id], autoHostlist: true,
+            $"Найдена поиском {DateTime.Now:dd.MM.yyyy}: {Best.Passed}/{Best.Total} целей, {Best.MedianLatency.TotalMilliseconds:0} мс. {Best.Candidate.Label}. Списки: general, blocked и автосписок. QUIC не перехватывается.");
         try
         {
             _main.UserStrategies.Save(s);

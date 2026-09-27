@@ -50,7 +50,7 @@ public static class EngineOptionCatalog
 
     private const int MaxHexBytes = 1460;
 
-    private static readonly Regex DomainRe = new(@"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", RegexOptions.CultureInvariant);
+    private static readonly Regex DomainRe = new(@"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,63}|xn--[a-z0-9-]{1,59})$", RegexOptions.CultureInvariant);
     private static readonly Regex BundledFileRe = new(@"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\.bin$", RegexOptions.CultureInvariant);
     private static readonly Regex HexRe = new(@"^0x([0-9a-fA-F]{2})+$", RegexOptions.CultureInvariant);
     private static readonly Regex AutoTtlRe = new(@"^[+-]?(?<d>\d{1,3})(:(?<min>\d{1,3})(-(?<max>\d{1,3}))?)?$", RegexOptions.CultureInvariant);

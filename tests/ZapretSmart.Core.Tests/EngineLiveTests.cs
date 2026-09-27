@@ -30,7 +30,7 @@ public sealed class EngineLiveTests : IDisposable
 
     private WinwsEngineHost Host() => new(
         Engine!,
-        new EngineLayout(Path.Combine(Path.GetDirectoryName(Engine!)!, "fake"), _lists),
+        new EngineLayout(Path.Combine(Path.GetDirectoryName(Engine!)!, "fake"), _lists, _lists),
         TimeSpan.FromSeconds(20));
 
     private static readonly Candidate PlainSplit = new("multisplit", ["dpi-desync=multisplit", "dpi-desync-split-pos=1,midsld"]);

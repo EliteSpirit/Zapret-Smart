@@ -18,8 +18,14 @@ public sealed record Intercept
 
 public sealed record Profile
 {
-    /// <summary>Идентификатор локального списка доменов. В стратегию попадает только id, не содержимое.</summary>
-    public string? Hostlist { get; init; }
+    /// <summary>Имена списков доменов. В стратегию попадают только имена, не содержимое.</summary>
+    public IReadOnlyList<string> Hostlists { get; init; } = [];
+
+    /// <summary>Имена списков IP. Профиль с ними срабатывает только для адресов из списков.</summary>
+    public IReadOnlyList<string> Ipsets { get; init; } = [];
+
+    /// <summary>Движок сам дописывает в автосписок домены, похожие на заблокированные.</summary>
+    public bool AutoHostlist { get; init; }
 
     /// <summary>Опции движка в порядке применения: "name=value" или "name" для флагов. Порядок важен.</summary>
     public required IReadOnlyList<string> Args { get; init; }

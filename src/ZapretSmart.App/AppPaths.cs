@@ -21,7 +21,8 @@ public sealed record AppPaths(
                 EngineExe: Path.Combine(baseDir, "engine", "winws.exe"),
                 Layout: new EngineLayout(
                     FakeDir: Path.Combine(baseDir, "engine", "fake"),
-                    ListsDir: Path.Combine(dataDir, "lists")),
+                    ListsDir: Path.Combine(dataDir, "lists"),
+                    IpsetsDir: Path.Combine(dataDir, "ipsets")),
                 BundledListsDir: Path.Combine(baseDir, "lists"),
                 PresetsDir: Path.Combine(baseDir, "strategies"),
                 UserStrategiesDir: Path.Combine(dataDir, "strategies"),

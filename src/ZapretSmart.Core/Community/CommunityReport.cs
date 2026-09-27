@@ -40,14 +40,15 @@ public static partial class CommunityReports
     /// Отчёт из сети превращается в стратегию только через тот же белый список, что и всё остальное.
     /// Перед применением стратегию из базы всё равно нужно прогнать локальным тестером.
     /// </summary>
-    public static Strategy? ToStrategy(CommunityReport report, string? hostlist)
+    public static Strategy? ToStrategy(CommunityReport report, IReadOnlyList<string> hostlists)
     {
         if (report.Args is null || report.Args.Count is 0 or > StrategyValidator.MaxArgsPerProfile) return null;
         var s = CandidateGenerator.ToStrategy(
             new Candidate("community", report.Args),
             id: "community-" + report.Asn,
             name: $"Сообщество: AS{report.Asn}",
-            hostlist: hostlist,
+            hostlists: hostlists,
+            autoHostlist: false,
             description: $"Из общей базы: {report.Passed}/{report.Total} целей, {report.MedianLatencyMs} мс. Не проверена у вас.");
         return StrategyValidator.Validate(s).Count == 0 ? s : null;
     }

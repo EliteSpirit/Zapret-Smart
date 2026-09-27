@@ -2,14 +2,20 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ZapretSmart.Core.Engine;
+using ZapretSmart.Core.Lists;
 using ZapretSmart.Core.Storage;
 using ZapretSmart.Core.Strategies;
 
 namespace ZapretSmart.App.ViewModels;
 
-public sealed record ListChoice(string? Id, string Title)
+public sealed partial class ListToggle(string id, string title, bool isChecked, Action changed) : ObservableObject
 {
-    public static readonly ListChoice All = new(null, "все домены");
+    public string Id { get; } = id;
+    public string Title { get; } = title;
+
+    [ObservableProperty] private bool _isChecked = isChecked;
+
+    partial void OnIsCheckedChanged(bool value) => changed();
 }
 
 public sealed partial class ProfileEditorViewModel : ObservableObject
@@ -19,17 +25,32 @@ public sealed partial class ProfileEditorViewModel : ObservableObject
     public ProfileEditorViewModel(StrategyEditorViewModel owner, Profile? profile)
     {
         Owner = owner;
-        _changed = owner.Revalidate;
-        _hostlist = owner.ListChoices.FirstOrDefault(c => c.Id == profile?.Hostlist) ?? ListChoice.All;
+        _changed = () =>
+        {
+            OnPropertyChanged(nameof(ScopeHint));
+            owner.Revalidate();
+        };
+        var hostlists = profile?.Hostlists ?? ["general", Subscriptions.BlockedDomains.Id];
+        var ipsets = profile?.Ipsets ?? [];
+        foreach (var id in owner.HostlistIds.Union(hostlists))
+            HostToggles.Add(new ListToggle(id, Title(id), hostlists.Contains(id), _changed));
+        foreach (var id in owner.IpsetIds.Union(ipsets))
+            IpToggles.Add(new ListToggle(id, Title(id), ipsets.Contains(id), _changed));
+        _autoHostlist = profile?.AutoHostlist ?? true;
         _argsText = profile is null ? "filter-tcp=443\ndpi-desync=multisplit\ndpi-desync-split-pos=1,midsld" : string.Join('\n', profile.Args);
     }
+
+    private static string Title(string id) => Subscriptions.IsSubscription(id) ? id + " (обновляется сам)" : id;
 
     public StrategyEditorViewModel Owner { get; }
 
     public static IReadOnlyList<string> OptionNames { get; } = EngineOptionCatalog.Names.Order(StringComparer.Ordinal).ToList();
 
+    public ObservableCollection<ListToggle> HostToggles { get; } = [];
+    public ObservableCollection<ListToggle> IpToggles { get; } = [];
+
     [ObservableProperty]
-    private ListChoice _hostlist;
+    private bool _autoHostlist;
 
     [ObservableProperty]
     private string _argsText;
@@ -38,13 +59,24 @@ public sealed partial class ProfileEditorViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(AddOptionCommand))]
     private string? _selectedOption;
 
-    partial void OnHostlistChanged(ListChoice value) => _changed();
+    partial void OnAutoHostlistChanged(bool value) => _changed();
     partial void OnArgsTextChanged(string value) => _changed();
+
+    public string ScopeHint =>
+        HostToggles.Any(t => t.IsChecked) || IpToggles.Any(t => t.IsChecked) || AutoHostlist
+            ? ""
+            : "Без списков профиль применяется ко всему трафику на своих портах.";
 
     public IReadOnlyList<string> Args =>
         ArgsText.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
 
-    public Profile ToProfile() => new() { Hostlist = Hostlist.Id, Args = Args };
+    public Profile ToProfile() => new()
+    {
+        Hostlists = HostToggles.Where(t => t.IsChecked).Select(t => t.Id).ToList(),
+        Ipsets = IpToggles.Where(t => t.IsChecked).Select(t => t.Id).ToList(),
+        AutoHostlist = AutoHostlist,
+        Args = Args,
+    };
 
     private bool CanAddOption() => SelectedOption is not null && EngineOptionCatalog.TryGet(SelectedOption.Trim(), out _);
 
@@ -66,10 +98,11 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
     public StrategyEditorViewModel(MainWindowViewModel main)
     {
         _main = main;
-        ReloadListChoices();
+        ReloadListIds();
     }
 
-    public ObservableCollection<ListChoice> ListChoices { get; } = [];
+    public IReadOnlyList<string> HostlistIds { get; private set; } = [];
+    public IReadOnlyList<string> IpsetIds { get; private set; } = [];
     public ObservableCollection<ProfileEditorViewModel> Profiles { get; } = [];
     public ObservableCollection<string> Errors { get; } = [];
 
@@ -122,7 +155,7 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
 
     public void SyncWith(IEnumerable<StrategyItem> items)
     {
-        ReloadListChoices();
+        ReloadListIds();
         var match = items.FirstOrDefault(i => i.Strategy.Id == EditingId);
         if (match is not null)
             SelectSilently(match);
@@ -130,14 +163,10 @@ public sealed partial class StrategyEditorViewModel : ObservableObject
             SelectedItem = items.FirstOrDefault();
     }
 
-    private void ReloadListChoices()
+    private void ReloadListIds()
     {
-        var current = ListChoices.ToList();
-        var ids = _main.Lists.Ids();
-        if (current.Count == ids.Count + 1 && current.Skip(1).Select(c => c.Id).SequenceEqual(ids)) return;
-        ListChoices.Clear();
-        ListChoices.Add(ListChoice.All);
-        foreach (var id in ids) ListChoices.Add(new ListChoice(id, id));
+        HostlistIds = _main.ListStore.HostlistIds();
+        IpsetIds = _main.ListStore.IpsetIds();
     }
 
     private void Load(StrategyItem item)

@@ -130,16 +130,32 @@
                                   Command="{Binding Owner.RemoveProfileCommand}" CommandParameter="{Binding}" />
                           <TextBlock Text="Профиль" FontWeight="SemiBold" VerticalAlignment="Center" />
                         </DockPanel>
-                        <DockPanel>
-                          <TextBlock Text="Список доменов" Classes="muted" VerticalAlignment="Center" Margin="0,0,12,0" />
-                          <ComboBox ItemsSource="{Binding Owner.ListChoices}" SelectedItem="{Binding Hostlist}" MinWidth="200">
-                            <ComboBox.ItemTemplate>
-                              <DataTemplate x:DataType="vm:ListChoice">
-                                <TextBlock Text="{Binding Title}" />
-                              </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                          </ComboBox>
-                        </DockPanel>
+                        <TextBlock Text="Списки доменов" Classes="muted" />
+                        <ItemsControl ItemsSource="{Binding HostToggles}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ListToggle">
+                              <CheckBox Content="{Binding Title}" IsChecked="{Binding IsChecked}" Margin="0,0,18,0" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <CheckBox IsChecked="{Binding AutoHostlist}"
+                                  Content="Автосписок: движок сам добавляет домены, соединения с которыми обрываются как при блокировке" />
+                        <TextBlock Text="Списки IP — только для трафика без имени сайта (игры, звонки)" Classes="muted" />
+                        <ItemsControl ItemsSource="{Binding IpToggles}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ListToggle">
+                              <CheckBox Content="{Binding Title}" IsChecked="{Binding IsChecked}" Margin="0,0,18,0" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding ScopeHint}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap"
+                                   IsVisible="{Binding ScopeHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                         <TextBlock Text="Опции движка, по одной на строку, без «--»" Classes="muted" />
                         <TextBox Text="{Binding ArgsText}" AcceptsReturn="True" MinHeight="110"
                                  FontFamily="Cascadia Mono,Consolas,monospace" FontSize="13" />
@@ -249,11 +265,45 @@
                 <TextBlock Classes="muted" FontStyle="Italic" Text="Сервер базы ещё не запущен: переключатель сохраняется, но обмен пока не происходит." />
               </StackPanel>
             </Border>
+            <Border Classes="card" DataContext="{Binding Blocklists}" x:DataType="vm:BlocklistsViewModel">
+              <StackPanel Spacing="10">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10">
+                    <ProgressBar IsIndeterminate="True" Width="60" IsVisible="{Binding IsUpdating}" VerticalAlignment="Center" />
+                    <Button Content="Обновить сейчас" Command="{Binding UpdateNowCommand}" />
+                  </StackPanel>
+                  <TextBlock Text="Списки блокировок" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </DockPanel>
+                <ItemsControl ItemsSource="{Binding Items}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SubscriptionStatus">
+                      <StackPanel Margin="0,4" Spacing="2">
+                        <DockPanel>
+                          <TextBlock DockPanel.Dock="Right" Text="{Binding Info}" Classes="muted" />
+                          <TextBlock Text="{Binding Title}" />
+                        </DockPanel>
+                        <TextBlock Text="{Binding Error}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap"
+                                   IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Classes="muted" Text="Обновляются при запуске приложения, если старше суток, или кнопкой. Движок подхватывает новые списки сам, без перезапуска. Источники: Re:filter и antifilter community. Из списка IP выброшены подсети больше 65 536 адресов (в исходных данных там Cloudflare и Google) и служебные адреса. Если загрузка выглядит обрезанной, остаётся прежний список." />
+                <DockPanel Margin="0,6,0,0">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Пересчитать" Command="{Binding RefreshAutoCommand}" />
+                    <Button Content="Очистить" Command="{Binding ClearAutoCommand}" />
+                  </StackPanel>
+                  <TextBlock Text="{Binding AutoInfo}" VerticalAlignment="Center" />
+                </DockPanel>
+                <TextBlock Classes="muted" Text="Автосписок ведёт сам движок. Если туда попал рабочий сайт и обход его ломает, впишите домен в exclude.txt — туда он больше не попадёт." />
+              </StackPanel>
+            </Border>
             <Border Classes="card">
               <StackPanel Spacing="10">
-                <TextBlock Text="Списки доменов" FontWeight="SemiBold" />
-                <TextBlock Classes="muted" Text="Файлы .txt, по домену на строку. Поддомены подхватываются автоматически. Изменения применяются при следующем включении обхода." />
-                <TextBlock Classes="muted" Text="{Binding Lists.Directory}" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" />
+                <TextBlock Text="Свои списки" FontWeight="SemiBold" />
+                <TextBlock Classes="muted" Text="Файлы .txt, по домену на строку, поддомены подхватываются автоматически. general.txt и новые файлы — ваши. blocked.txt перезаписывается при обновлении. exclude.txt — домены, которые обход не трогает." />
+                <TextBlock Classes="muted" Text="{Binding ListStore.Directory}" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" />
                 <Button Content="Открыть папку" Command="{Binding OpenListsFolderCommand}" IsEnabled="{Binding IsWindows}" />
               </StackPanel>
             </Border>

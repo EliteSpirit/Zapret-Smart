@@ -177,7 +177,7 @@ public class StrategySearchTests
         foreach (var c in AllGenerated())
         {
             Assert.Empty(StrategyValidator.Validate(CandidateGenerator.ToProbeStrategy(c, SearchOptions.TargetsListId)));
-            Assert.Empty(StrategyValidator.Validate(CandidateGenerator.ToStrategy(c, "found", "found", "general", "")));
+            Assert.Empty(StrategyValidator.Validate(CandidateGenerator.ToStrategy(c, "found", "found", ["general", "blocked"], true, "")));
         }
     }
 

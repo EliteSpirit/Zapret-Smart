@@ -110,20 +110,20 @@ public static class CandidateGenerator
         Id = "search-probe",
         Name = c.Label,
         Intercept = new Intercept { Tcp = "443" },
-        Profiles = [new Profile { Hostlist = targetsListId, Args = ["filter-tcp=443", .. c.Args] }],
+        Profiles = [new Profile { Hostlists = [targetsListId], Args = ["filter-tcp=443", .. c.Args] }],
     };
 
     /// <summary>
     /// Итоговая стратегия из найденного кандидата. Тот же профиль ставится и на tcp/80: разрезы по host/midsld
     /// работают и для HTTP. QUIC не проверялся, поэтому UDP не перехватывается и браузер уйдёт на TCP.
     /// </summary>
-    public static Strategy ToStrategy(Candidate c, string id, string name, string? hostlist, string description) => new()
+    public static Strategy ToStrategy(Candidate c, string id, string name, IReadOnlyList<string> hostlists, bool autoHostlist, string description) => new()
     {
         Id = id,
         Name = name,
         Description = description,
         Intercept = new Intercept { Tcp = "80,443" },
-        Profiles = [new Profile { Hostlist = hostlist, Args = ["filter-tcp=80,443", .. c.Args] }],
+        Profiles = [new Profile { Hostlists = hostlists, AutoHostlist = autoHostlist, Args = ["filter-tcp=80,443", .. c.Args] }],
     };
 
     private static Candidate C(string label, params string[] args) => new(label, args);

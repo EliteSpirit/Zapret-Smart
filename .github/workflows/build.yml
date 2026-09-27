@@ -34,6 +34,11 @@ jobs:
           ZS_ENGINE: ${{ github.workspace }}/engine/nfq/nfqws
         run: dotnet test -c Release
 
+      - name: Engine list semantics on live traffic (guard, autohostlist, exclude)
+        run: |
+          sudo modprobe nfnetlink_queue || true
+          sudo tests/engine/guard-live.sh engine/nfq/nfqws
+
   windows:
     runs-on: windows-latest
     steps:

@@ -34,7 +34,7 @@ public sealed class WinwsEngineHostTests : IDisposable
         File.WriteAllText(exe, "#!/bin/sh\necho $$ > '" + PidFile + "'\n" + script + "\n");
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(exe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        return new WinwsEngineHost(exe, new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(_dir, "lists")),
+        return new WinwsEngineHost(exe, new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(_dir, "lists"), Path.Combine(_dir, "ipsets")),
             timeout ?? TimeSpan.FromSeconds(10));
     }
 
@@ -119,14 +119,14 @@ public sealed class WinwsEngineHostTests : IDisposable
         using var host = HostWith($"printf '%s\\n' \"$@\" > '{args}'\necho 'capture is started'\nexec sleep 30");
         await using (await host.StartAsync(Probe, CancellationToken.None)) { }
         var lines = File.ReadAllLines(args);
-        Assert.Equal(["--wf-tcp=443", "--hostlist=" + Path.Combine(_dir, "lists", SearchOptions.TargetsListId + ".txt"), "--filter-tcp=443", "--dpi-desync=multisplit"], lines);
+        Assert.Equal(["--wf-tcp=443", "--hostlist=" + Path.Combine(_dir, "lists", SearchOptions.TargetsListId + ".txt"), "--hostlist-domains=" + EngineCommandBuilder.GuardDomain, "--filter-tcp=443", "--dpi-desync=multisplit"], lines);
     }
 
     [Fact]
     public async Task MissingExecutableIsNotSwallowed()
     {
         using var host = new WinwsEngineHost(Path.Combine(_dir, "nope.exe"),
-            new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(_dir, "lists")), TimeSpan.FromSeconds(1));
+            new EngineLayout(Path.Combine(AppContext.BaseDirectory, "fake"), Path.Combine(_dir, "lists"), Path.Combine(_dir, "ipsets")), TimeSpan.FromSeconds(1));
         await Assert.ThrowsAsync<FileNotFoundException>(() => host.StartAsync(Probe, CancellationToken.None));
     }
 
