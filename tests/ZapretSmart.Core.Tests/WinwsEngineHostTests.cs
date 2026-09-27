@@ -84,6 +84,16 @@ public sealed class WinwsEngineHostTests : IDisposable
     }
 
     [UnixFact]
+    public async Task StderrReasonSurvivesStdoutFlushedAtExit()
+    {
+        // winws так и делает: причина в stderr сразу, а буфер stdout выливается при выходе и идёт после неё.
+        using var host = HostWith("echo 'A copy of winws is already running with the same filter' >&2\nsleep 0.2\nfor i in 1 2 3 4 5 6 7 8; do echo \"profile line $i\"; done\necho\nexit 1");
+        var e = await Assert.ThrowsAsync<EngineStartException>(() => host.StartAsync(Probe, CancellationToken.None));
+        Assert.Contains("already running", e.Message);
+        Assert.Contains("profile line 8", e.Message);
+    }
+
+    [UnixFact]
     public async Task MissingMarkerTimesOutAndKillsEngine()
     {
         using var host = HostWith("echo 'starting'\nexec sleep 30", TimeSpan.FromMilliseconds(700));

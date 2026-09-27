@@ -12,6 +12,9 @@ public sealed class EngineRunner(string executablePath) : IDisposable
     private static readonly Lazy<KillOnCloseJob> SharedJob = new(() => new KillOnCloseJob());
 
     public event Action<string>? Output;
+
+    /// <summary>Только stderr, дополнительно к Output. Туда движок пишет причину отказа, а stdout он сбрасывает при выходе, и та строка тонет в хвосте.</summary>
+    public event Action<string>? ErrorOutput;
     public event Action<int>? Exited;
 
     public string ExecutablePath { get; } = executablePath;
@@ -42,7 +45,12 @@ public sealed class EngineRunner(string executablePath) : IDisposable
 
             var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
             p.OutputDataReceived += (_, e) => { if (e.Data is not null) Output?.Invoke(e.Data); };
-            p.ErrorDataReceived += (_, e) => { if (e.Data is not null) Output?.Invoke(e.Data); };
+            p.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is null) return;
+                ErrorOutput?.Invoke(e.Data);
+                Output?.Invoke(e.Data);
+            };
             p.Exited += (_, _) =>
             {
                 int code;
