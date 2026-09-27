@@ -342,6 +342,7 @@ public sealed class EditorTests : IDisposable
         Assert.False(again.CloseToTray);
     }
 
+    /// <summary>Часы анимаций, которые идут только по команде: проверка не зависит от скорости машины.</summary>
     [AvaloniaFact]
     public void TabSwitchPlaysEnterAnimation()
     {
@@ -350,15 +351,23 @@ public sealed class EditorTests : IDisposable
         w.Show();
         var tabs = w.GetVisualDescendants().OfType<TabControl>().Single();
         tabs.SelectedIndex = 3;
-        Dispatcher.UIThread.RunJobs();
-        AvaloniaHeadlessPlatform.ForceRenderTimerTick();
         var page = (Visual)tabs.SelectedContent!;
-        Assert.True(page.Opacity < 1, "содержимое вкладки должно появляться, а не выскакивать");
-        for (var i = 0; i < 60; i++)
+
+        // Часы headless-платформы идут по настоящему времени: под нагрузкой 180 мс анимации проходят между двумя тиками.
+        // Поэтому смотрим не на мгновенное значение, а на то, что прозрачность вообще проходила через ноль.
+        var lowest = page.Opacity;
+        page.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Visual.OpacityProperty) lowest = Math.Min(lowest, (double)e.NewValue!);
+        };
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        do
         {
             Dispatcher.UIThread.RunJobs();
             AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
+        } while ((lowest >= 1 || page.Opacity < 1) && DateTime.UtcNow < deadline);
+
+        Assert.True(lowest < 0.1, "содержимое вкладки должно появляться, а не выскакивать");
         Assert.Equal(1, page.Opacity, 3);
     }
 
