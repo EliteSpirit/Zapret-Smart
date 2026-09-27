@@ -1,0 +1,121 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ZapretSmart.App.ViewModels"
+        x:Class="ZapretSmart.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Zapret Smart"
+        Width="1000" Height="660" MinWidth="820" MinHeight="520"
+        Background="{StaticResource ZsBackground}">
+
+  <Grid>
+    <Border Width="200" HorizontalAlignment="Left" Background="{StaticResource ZsSurface}"
+            BorderBrush="{StaticResource ZsBorder}" BorderThickness="0,0,1,0" />
+    <StackPanel Margin="24,22,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="2" IsHitTestVisible="False">
+      <TextBlock Text="Zapret" FontSize="20" FontWeight="Bold" Foreground="{StaticResource ZsText}" />
+      <TextBlock Text="SMART" FontSize="11" FontWeight="SemiBold" LetterSpacing="3" Foreground="{StaticResource ZsAccent}" />
+    </StackPanel>
+
+    <TabControl Classes="nav">
+
+      <TabItem Header="Обход">
+        <ScrollViewer Padding="28">
+          <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Stretch">
+            <TextBlock Classes="h1" Text="{Binding StatusText}" />
+
+            <Border Classes="card">
+              <StackPanel Spacing="14">
+                <TextBlock Text="Стратегия" Classes="muted" />
+                <ComboBox ItemsSource="{Binding Strategies}" SelectedItem="{Binding SelectedStrategy}"
+                          IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Stretch">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:StrategyItem">
+                      <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="{Binding SelectedStrategy.Description, FallbackValue=''}" Classes="muted" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <Button Classes="primary" Content="Включить" Command="{Binding StartCommand}" />
+                  <Button Classes="danger" Content="Выключить" Command="{Binding StopCommand}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+              <DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                  <Button DockPanel.Dock="Right" Content="Очистить" Command="{Binding ClearLogCommand}" />
+                  <TextBlock Text="Журнал движка" Classes="muted" VerticalAlignment="Center" />
+                </DockPanel>
+                <ListBox ItemsSource="{Binding Log}" Height="220" Background="Transparent"
+                         FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" />
+              </DockPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="Стратегии">
+        <ScrollViewer Padding="28">
+          <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Stretch">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Content="Перечитать" Command="{Binding ReloadStrategiesCommand}" />
+              <TextBlock Classes="h1" Text="Стратегии" />
+            </DockPanel>
+            <ItemsControl ItemsSource="{Binding Strategies}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:StrategyItem">
+                  <Border Classes="card" Margin="0,0,0,10">
+                    <StackPanel Spacing="6">
+                      <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Origin}" Classes="muted" FontSize="12" />
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="16" />
+                      </DockPanel>
+                      <TextBlock Text="{Binding Description}" Classes="muted" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <ItemsControl ItemsSource="{Binding LoadErrors}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <TextBlock Text="{Binding}" Foreground="{StaticResource ZsDanger}" TextWrapping="Wrap" Margin="0,0,0,6" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="Поиск">
+        <StackPanel Margin="28" Spacing="14" MaxWidth="760" HorizontalAlignment="Stretch">
+          <TextBlock Classes="h1" Text="Поиск стратегии" />
+          <Border Classes="card">
+            <TextBlock Classes="muted"
+                       Text="Автоподбор стратегии под вашего провайдера: поэтапный перебор режимов и параметров с проверкой доступности сайтов. Будет в следующей версии." />
+          </Border>
+        </StackPanel>
+      </TabItem>
+
+      <TabItem Header="Настройки">
+        <ScrollViewer Padding="28">
+          <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Stretch">
+            <TextBlock Classes="h1" Text="Настройки" />
+            <Border Classes="card">
+              <StackPanel Spacing="10">
+                <ToggleSwitch IsChecked="{Binding CommunityEnabled}" OnContent="Обмен с сообществом включён"
+                              OffContent="Обмен с сообществом выключен" />
+                <TextBlock Classes="muted" Text="Включено: приложение может брать стратегии из общей базы, а ваши стратегии, прошедшие автотест, отправляются в неё." />
+                <TextBlock Classes="muted" Text="Отправляется: номер сети провайдера (ASN), регион (субъект), параметры стратегии и результаты теста на стандартном наборе сайтов." />
+                <TextBlock Classes="muted" Text="Не отправляется никогда: ваши списки сайтов, журналы, история соединений. Сервер при этом видит ваш IP-адрес, как любой сайт, к которому вы подключаетесь." />
+                <TextBlock Classes="muted" FontStyle="Italic" Text="Сервер базы ещё не запущен: переключатель сохраняется, но обмен пока не происходит." />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+    </TabControl>
+  </Grid>
+</Window>

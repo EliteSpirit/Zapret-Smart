@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+TestResults/
+artifacts/
+engine/nfq/nfqws
+engine/nfq/winws
+engine/nfq/winws.exe

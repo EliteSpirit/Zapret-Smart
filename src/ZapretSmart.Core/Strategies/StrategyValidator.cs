@@ -1,0 +1,114 @@
+using System.Text.RegularExpressions;
+
+namespace ZapretSmart.Core.Strategies;
+
+public readonly record struct ParsedArg(string Name, string? Value, EngineOption Option);
+
+public static class StrategyValidator
+{
+    public const int MaxProfiles = 16;
+    public const int MaxArgsPerProfile = 48;
+
+    private static readonly Regex IdRe = new(@"^[a-z0-9][a-z0-9_-]{0,63}$", RegexOptions.CultureInvariant);
+    private static readonly Regex OptionNameRe = new(@"^[a-z0-9][a-z0-9-]{0,63}$", RegexOptions.CultureInvariant);
+
+    public static IReadOnlyList<string> Validate(Strategy s)
+    {
+        var errors = new List<string>();
+
+        if (!IdRe.IsMatch(s.Id ?? ""))
+            errors.Add("id: допустимы только a-z, 0-9, '_' и '-', до 64 символов");
+        if (string.IsNullOrWhiteSpace(s.Name) || s.Name.Length > 100)
+            errors.Add("name: обязательно, до 100 символов");
+        if (s.Description is { Length: > 2000 })
+            errors.Add("description: не длиннее 2000 символов");
+
+        if (s.Intercept is null || (s.Intercept.Tcp is null && s.Intercept.Udp is null))
+            errors.Add("intercept: нужно указать хотя бы tcp или udp");
+        else
+        {
+            if (s.Intercept.Tcp is not null && !EngineOptionCatalog.IsPortList(s.Intercept.Tcp))
+                errors.Add($"intercept.tcp: некорректный список портов '{s.Intercept.Tcp}'");
+            if (s.Intercept.Udp is not null && !EngineOptionCatalog.IsPortList(s.Intercept.Udp))
+                errors.Add($"intercept.udp: некорректный список портов '{s.Intercept.Udp}'");
+        }
+
+        if (s.Profiles is null || s.Profiles.Count == 0)
+            errors.Add("profiles: нужен хотя бы один профиль");
+        else if (s.Profiles.Count > MaxProfiles)
+            errors.Add($"profiles: не больше {MaxProfiles}");
+        else
+        {
+            for (var i = 0; i < s.Profiles.Count; i++)
+                ValidateProfile(s.Profiles[i], $"profiles[{i}]", errors);
+        }
+
+        return errors;
+    }
+
+    public static bool IsValidListId(string id) => IdRe.IsMatch(id);
+
+    private static void ValidateProfile(Profile p, string path, List<string> errors)
+    {
+        if (p.Hostlist is not null && !IsValidListId(p.Hostlist))
+            errors.Add($"{path}.hostlist: ожидается идентификатор списка, а не путь");
+
+        if (p.Args is null || p.Args.Count == 0)
+        {
+            errors.Add($"{path}.args: пусто");
+            return;
+        }
+        if (p.Args.Count > MaxArgsPerProfile)
+        {
+            errors.Add($"{path}.args: не больше {MaxArgsPerProfile}");
+            return;
+        }
+
+        var hasDesync = false;
+        for (var j = 0; j < p.Args.Count; j++)
+        {
+            if (TryParseArg(p.Args[j], out var arg, out var error))
+                hasDesync |= arg.Name is "dpi-desync" or "dup" or "wssize" or "hostcase" or "hostspell" or "domcase" or "methodeol" or "hostnospace";
+            else
+                errors.Add($"{path}.args[{j}]: {error}");
+        }
+        if (!hasDesync)
+            errors.Add($"{path}: профиль ничего не делает с трафиком (нет dpi-desync или модификаторов)");
+    }
+
+    public static bool TryParseArg(string raw, out ParsedArg arg, out string error)
+    {
+        arg = default;
+        if (string.IsNullOrEmpty(raw))
+        {
+            error = "пустой аргумент";
+            return false;
+        }
+
+        var eq = raw.IndexOf('=');
+        var name = eq < 0 ? raw : raw[..eq];
+        var value = eq < 0 ? null : raw[(eq + 1)..];
+
+        if (!OptionNameRe.IsMatch(name))
+        {
+            error = $"'{Truncate(raw)}': имя опции без '--', только a-z, 0-9 и '-'";
+            return false;
+        }
+        if (!EngineOptionCatalog.TryGet(name, out var option))
+        {
+            error = $"опция '{name}' не разрешена в стратегиях";
+            return false;
+        }
+        if (!option.IsValid(value))
+        {
+            error = $"недопустимое значение для '{name}': '{Truncate(value ?? "<нет>")}'";
+            return false;
+        }
+
+        arg = new ParsedArg(name, value, option);
+        error = "";
+        return true;
+    }
+
+    private static string Truncate(string s) => s.Length <= 64 ? s : s[..64] + "…";
+}

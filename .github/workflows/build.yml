@@ -1,0 +1,85 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: 1
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  WINDIVERT_VERSION: 2.2.2
+  WINDIVERT_SHA256: 63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15
+
+jobs:
+  core-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build nfqws from engine/nfq
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libnetfilter-queue-dev libmnl-dev libcap-dev zlib1g-dev
+          make -C engine/nfq nfqws
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test (with engine dry-run)
+        env:
+          ZS_ENGINE: ${{ github.workspace }}/engine/nfq/nfqws
+        run: dotnet test -c Release
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cygwin/cygwin-install-action@v4
+        with:
+          packages: gcc-core make zlib-devel
+
+      - name: Build winws
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -e -o igncr -o pipefail {0}
+        run: |
+          make -C engine/nfq cygwin64
+          ls -la engine/nfq/winws.exe
+
+      - name: Fetch WinDivert
+        shell: pwsh
+        run: |
+          $zip = "WinDivert.zip"
+          Invoke-WebRequest "https://github.com/basil00/WinDivert/releases/download/v$env:WINDIVERT_VERSION/WinDivert-$env:WINDIVERT_VERSION-A.zip" -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:WINDIVERT_SHA256) { throw "WinDivert SHA256 mismatch: $hash" }
+          Expand-Archive $zip -DestinationPath windivert
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          $out = "artifacts/ZapretSmart"
+          dotnet publish src/ZapretSmart.App -c Release -r win-x64 --self-contained -o $out
+          $engine = "$out/engine"
+          Copy-Item engine/nfq/winws.exe $engine
+          Copy-Item C:/cygwin/bin/cygwin1.dll $engine
+          Copy-Item "windivert/WinDivert-$env:WINDIVERT_VERSION-A/x64/WinDivert.dll" $engine
+          Copy-Item "windivert/WinDivert-$env:WINDIVERT_VERSION-A/x64/WinDivert64.sys" $engine
+          Copy-Item LICENSE, engine/LICENSE.zapret.txt $out
+
+      - name: Test (with winws dry-run)
+        env:
+          ZS_ENGINE: ${{ github.workspace }}\artifacts\ZapretSmart\engine\winws.exe
+        run: dotnet test -c Release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZapretSmart-win-x64
+          path: artifacts/ZapretSmart

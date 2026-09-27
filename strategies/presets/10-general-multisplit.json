@@ -1,0 +1,37 @@
+{
+  "id": "general-multisplit",
+  "name": "Общая: fake + multisplit",
+  "description": "YouTube/Discord и прочее из списка general. TLS: фейк + разрез по midsld, HTTP: autottl, QUIC: фейковый initial.",
+  "intercept": { "tcp": "80,443", "udp": "443" },
+  "profiles": [
+    {
+      "hostlist": "general",
+      "args": [
+        "filter-udp=443",
+        "dpi-desync=fake",
+        "dpi-desync-repeats=6",
+        "dpi-desync-fake-quic=quic_initial_www_google_com.bin"
+      ]
+    },
+    {
+      "hostlist": "general",
+      "args": [
+        "filter-tcp=80",
+        "dpi-desync=fake,multisplit",
+        "dpi-desync-autottl=2",
+        "dpi-desync-fooling=md5sig"
+      ]
+    },
+    {
+      "hostlist": "general",
+      "args": [
+        "filter-tcp=443",
+        "dpi-desync=fake,multisplit",
+        "dpi-desync-split-pos=1,midsld",
+        "dpi-desync-repeats=6",
+        "dpi-desync-fooling=md5sig",
+        "dpi-desync-fake-tls=tls_clienthello_www_google_com.bin"
+      ]
+    }
+  ]
+}

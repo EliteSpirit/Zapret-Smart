@@ -1,0 +1,16 @@
+{
+  "id": "discord-voice",
+  "name": "Discord: голос",
+  "description": "Только голосовые каналы Discord (UDP 50000-50100, протоколы discord/stun).",
+  "intercept": { "udp": "50000-50100" },
+  "profiles": [
+    {
+      "args": [
+        "filter-udp=50000-50100",
+        "filter-l7=discord,stun",
+        "dpi-desync=fake",
+        "dpi-desync-repeats=6"
+      ]
+    }
+  ]
+}
