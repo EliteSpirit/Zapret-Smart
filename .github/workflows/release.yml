@@ -3,6 +3,11 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия без v, например 0.1.0'
+        required: true
 
 permissions:
   contents: read
@@ -16,8 +21,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate tag
+        run: |
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "bad version: $TAG"; exit 1; }
 
       - uses: actions/download-artifact@v4
         with:
@@ -26,8 +37,7 @@ jobs:
 
       - name: Package
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ZIP="ZapretSmart-${VERSION}-win-x64.zip"
+          ZIP="ZapretSmart-${TAG#v}-win-x64.zip"
           (cd ZapretSmart && zip -qr "../$ZIP" .)
           sha256sum "$ZIP" > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -37,10 +47,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
-          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+          NOTES=".github/release-notes/$TAG.md"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            git tag -l --format='%(contents)' "$TAG" > notes.md
+          elif [ -f "$NOTES" ]; then
+            cp "$NOTES" notes.md
+          else
+            echo "нет $NOTES"; exit 1
+          fi
           printf '\n## SHA-256\n\n```\n%s\n```\n' "$(cat SHA256SUMS.txt)" >> notes.md
           PRERELEASE=""
-          case "$GITHUB_REF_NAME" in v0.*|*-*) PRERELEASE="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" "$ZIP" SHA256SUMS.txt \
-            --title "Zapret Smart ${GITHUB_REF_NAME#v}" --notes-file notes.md $PRERELEASE --verify-tag
+          case "$TAG" in v0.*|*-*) PRERELEASE="--prerelease" ;; esac
+          # При ручном запуске тега ещё нет: gh создаёт его на собранном коммите.
+          gh release create "$TAG" "$ZIP" SHA256SUMS.txt --target "$GITHUB_SHA" \
+            --title "Zapret Smart ${TAG#v}" --notes-file notes.md $PRERELEASE
