@@ -159,6 +159,8 @@ public sealed class UpdatesTests : IDisposable
             : new ProcessStartInfo("true") { UseShellExecute = false })!;
         finished.WaitForExit();
         var psi = new ProcessStartInfo(PowerShell()!) { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
+        // Тест запускается из шага CI в PowerShell 7: как и приложение, изолируем Windows PowerShell от его модулей.
+        UpdateInstaller.IsolateFromPowerShell7(psi);
         var manifest = UpdateInstaller.WriteManifest(source);
         foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-ProcessId", finished.Id.ToString(),
                      "-Source", source, "-Manifest", manifest, "-Target", target, "-Log", log, "-Retries", retries.ToString(), "-NoStart" })

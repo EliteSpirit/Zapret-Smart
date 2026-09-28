@@ -88,8 +88,15 @@ public sealed class UpdateInstaller(HttpClient http, string workRoot)
                 "-Source", newFiles, "-Manifest", manifest, "-Target", installDir, "-Log", log,
             },
         };
+        IsolateFromPowerShell7(psi);
         return Process.Start(psi) ?? throw new UpdateException("не удалось запустить установку");
     }
+
+    /// <summary>
+    /// Если приложение запущено из терминала PowerShell 7, дочерний Windows PowerShell наследует PSModulePath с модулями 7-й версии,
+    /// не может их загрузить и остаётся без Get-FileHash: замена молча откатывалась бы каждый раз. Без переменной 5.1 берёт свои пути.
+    /// </summary>
+    public static void IsolateFromPowerShell7(ProcessStartInfo psi) => psi.Environment.Remove("PSModulePath");
 
     /// <summary>
     /// Относительные пути файлов новой версии, по одному на строку. Считаем их здесь, а не в скрипте: на Windows временная
