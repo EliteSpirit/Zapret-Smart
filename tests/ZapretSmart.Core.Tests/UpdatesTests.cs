@@ -159,8 +159,9 @@ public sealed class UpdatesTests : IDisposable
             : new ProcessStartInfo("true") { UseShellExecute = false })!;
         finished.WaitForExit();
         var psi = new ProcessStartInfo(PowerShell()!) { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
+        var manifest = UpdateInstaller.WriteManifest(source);
         foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-ProcessId", finished.Id.ToString(),
-                     "-Source", source, "-Target", target, "-Log", log, "-Retries", retries.ToString(), "-NoStart" })
+                     "-Source", source, "-Manifest", manifest, "-Target", target, "-Log", log, "-Retries", retries.ToString(), "-NoStart" })
             psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         var err = p.StandardError.ReadToEnd();
@@ -182,6 +183,8 @@ public sealed class UpdatesTests : IDisposable
         var (source, target, log) = ScriptSetup();
         RunScript(WriteScript(), source, target, log, retries: 3);
 
+        var journal = File.Exists(log) ? File.ReadAllText(log) : "(журнала нет)";
+        Assert.True(journal.Contains("ok: заменено файлов 2", StringComparison.Ordinal), journal);
         Assert.Equal("new dll", File.ReadAllText(Path.Combine(target, "ZapretSmart.dll")));
         Assert.Equal("added", File.ReadAllText(Path.Combine(target, "engine", "added.bin")));
         Assert.Equal("не трогать", File.ReadAllText(Path.Combine(target, "user-note.txt")));
@@ -200,6 +203,8 @@ public sealed class UpdatesTests : IDisposable
         using (new FileStream(Path.Combine(target, "zz-locked.exe"), FileMode.Open, FileAccess.Read, FileShare.Read))
             RunScript(WriteScript(), source, target, log, retries: 1);
 
+        // Ошибка должна быть именно на занятом файле, а не общим провалом скрипта до начала замены.
+        Assert.Contains("zz-locked.exe", File.ReadAllText(log));
         Assert.Contains("ошибка", File.ReadAllText(log));
         Assert.Equal("old dll", File.ReadAllText(Path.Combine(target, "ZapretSmart.dll")));
         Assert.Equal("old exe", File.ReadAllText(Path.Combine(target, "zz-locked.exe")));

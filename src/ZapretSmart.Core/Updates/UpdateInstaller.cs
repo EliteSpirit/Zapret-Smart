@@ -76,6 +76,7 @@ public sealed class UpdateInstaller(HttpClient http, string workRoot)
     {
         var script = Path.Combine(workRoot, "apply-update.ps1");
         File.WriteAllText(script, ApplyScript, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        var manifest = WriteManifest(newFiles);
         var psi = new ProcessStartInfo("powershell.exe")
         {
             UseShellExecute = false,
@@ -84,10 +85,24 @@ public sealed class UpdateInstaller(HttpClient http, string workRoot)
             {
                 "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
                 "-ProcessId", Environment.ProcessId.ToString(),
-                "-Source", newFiles, "-Target", installDir, "-Log", log,
+                "-Source", newFiles, "-Manifest", manifest, "-Target", installDir, "-Log", log,
             },
         };
         return Process.Start(psi) ?? throw new UpdateException("не удалось запустить установку");
+    }
+
+    /// <summary>
+    /// Относительные пути файлов новой версии, по одному на строку. Считаем их здесь, а не в скрипте: на Windows временная
+    /// папка бывает в коротком виде 8.3 (RUNNER~1), а Windows PowerShell отдаёт FullName в длинном, и отрезание длины
+    /// исходной папки давало мусорные пути: скрипт падал и не менял ни одного файла.
+    /// </summary>
+    public static string WriteManifest(string newFiles)
+    {
+        var manifest = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(newFiles).TrimEnd(Path.DirectorySeparatorChar))!, "files.txt");
+        File.WriteAllLines(manifest, Directory.EnumerateFiles(newFiles, "*", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(newFiles, f)).Order(StringComparer.OrdinalIgnoreCase),
+            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        return manifest;
     }
 
     /// <summary>
@@ -95,24 +110,24 @@ public sealed class UpdateInstaller(HttpClient http, string workRoot)
     /// Одинаковые по хэшу файлы не трогаются: так не приходится перезаписывать WinDivert64.sys, пока драйвер загружен.
     /// </summary>
     public const string ApplyScript = """
-        param([int]$ProcessId, [string]$Source, [string]$Target, [string]$Log, [int]$Retries = 20, [switch]$NoStart)
+        param([int]$ProcessId, [string]$Source, [string]$Manifest, [string]$Target, [string]$Log, [int]$Retries = 20, [switch]$NoStart)
         $ErrorActionPreference = 'Stop'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Log) | Out-Null
         function Write-Log([string]$Message) {
             Add-Content -LiteralPath $Log -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + ' ' + $Message) -Encoding UTF8
         }
         try { Wait-Process -Id $ProcessId -Timeout 60 -ErrorAction SilentlyContinue } catch { }
-        $Source = (Resolve-Path -LiteralPath $Source).Path.TrimEnd('\', '/')
-        $backup = Join-Path (Split-Path -Parent $Source) 'backup'
+        $backup = Join-Path (Split-Path -Parent $Manifest) 'backup'
         $replaced = New-Object System.Collections.ArrayList
         $created = New-Object System.Collections.ArrayList
         try {
             $plan = New-Object System.Collections.ArrayList
-            foreach ($file in Get-ChildItem -LiteralPath $Source -Recurse -File) {
-                $rel = $file.FullName.Substring($Source.Length).TrimStart('\', '/')
+            foreach ($rel in Get-Content -LiteralPath $Manifest -Encoding UTF8) {
+                if ($rel.Trim().Length -eq 0) { continue }
+                $src = Join-Path $Source $rel
                 $dst = Join-Path $Target $rel
-                if ((Test-Path -LiteralPath $dst) -and ((Get-FileHash -LiteralPath $dst).Hash -eq (Get-FileHash -LiteralPath $file.FullName).Hash)) { continue }
-                [void]$plan.Add(@($file.FullName, $dst, $rel))
+                if ((Test-Path -LiteralPath $dst) -and ((Get-FileHash -LiteralPath $dst).Hash -eq (Get-FileHash -LiteralPath $src).Hash)) { continue }
+                [void]$plan.Add(@($src, $dst, $rel))
             }
             foreach ($item in $plan) {
                 $src = $item[0]; $dst = $item[1]; $rel = $item[2]
