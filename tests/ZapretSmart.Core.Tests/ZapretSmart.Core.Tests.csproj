@@ -22,5 +22,6 @@
     <None Include="..\..\strategies\presets\*.json" Link="presets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\engine\files\fake\*.bin" Link="fake\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\lists\*.txt" Link="lists\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\hosts\*.hosts" Link="hosts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

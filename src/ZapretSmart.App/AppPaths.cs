@@ -9,8 +9,14 @@ public sealed record AppPaths(
     string BundledListsDir,
     string PresetsDir,
     string UserStrategiesDir,
-    string SettingsFile)
+    string SettingsFile,
+    string? HostsFile = null)
 {
+    /// <summary>Папка данных пользователя: настройки, резервная копия hosts, журнал обновления.</summary>
+    public string DataDir => Path.GetDirectoryName(SettingsFile)!;
+
+    public string BundledHostsSnapshot => Path.Combine(AppContext.BaseDirectory, "hosts", "flowseal.hosts");
+
     public static AppPaths Default
     {
         get
@@ -26,7 +32,9 @@ public sealed record AppPaths(
                 BundledListsDir: Path.Combine(baseDir, "lists"),
                 PresetsDir: Path.Combine(baseDir, "strategies"),
                 UserStrategiesDir: Path.Combine(dataDir, "strategies"),
-                SettingsFile: SettingsStore.DefaultPath);
+                SettingsFile: SettingsStore.DefaultPath,
+                // Системный hosts правим только на Windows; в тестах путь не задан, и до системного файла они не дотянутся.
+                HostsFile: OperatingSystem.IsWindows() ? Core.Hosts.HostsFile.DefaultPath : null);
         }
     }
 }

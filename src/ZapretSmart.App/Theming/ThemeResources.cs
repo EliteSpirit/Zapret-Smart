@@ -63,7 +63,12 @@ public static class ThemeResources
         d["ZsDangerSoft"] = B(dangerHover);
         d["ZsWarning"] = B(p.Warning);
         d["ZsWarningSoft"] = B(WithAlpha(p.Warning, 0.14));
-        d["ZsHover"] = B(WithAlpha(p.Text, 0.05));
+        // Прозрачные состояния того же цвета, что и видимые. Переход к Brushes.Transparent (это белый с нулевой альфой)
+        // шёл через светлый полупрозрачный цвет, и покидаемый пункт меню на кадр вспыхивал.
+        d["ZsHover"] = B(WithAlpha(p.SurfaceRaised, 0.6));
+        d["ZsRaisedClear"] = B(WithAlpha(p.SurfaceRaised, 0));
+        d["ZsAccentClear"] = B(WithAlpha(p.Accent, 0));
+        d["ZsDangerClear"] = B(WithAlpha(p.Danger, 0));
         d["ZsCode"] = B(theme.IsLight ? p.Background : Mix(p.Background, p.Surface, 0.2));
         d["ZsCardRadius"] = new CornerRadius(theme.CardRadius);
         d["ZsControlRadius"] = new CornerRadius(theme.ControlRadius);
@@ -203,6 +208,10 @@ public static class ThemeResources
         d["ToolTipForeground"] = B(p.Text);
         d["ToolTipBorderBrush"] = B(p.Border);
         d["TabItemHeaderSelectedPipeFill"] = B(p.Accent);
+        foreach (var state in new[] { "Unselected", "UnselectedPointerOver", "UnselectedPressed", "Disabled" })
+            d["TabItemHeaderBackground" + state] = B(state == "Unselected" || state == "Disabled" ? WithAlpha(p.SurfaceRaised, 0) : WithAlpha(p.SurfaceRaised, 0.6));
+        foreach (var state in new[] { "Selected", "SelectedPointerOver", "SelectedPressed" })
+            d["TabItemHeaderBackground" + state] = B(p.SurfaceRaised);
         return d;
     }
 

@@ -5,6 +5,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ZapretSmart.App.Theming;
 using ZapretSmart.Core.Engine;
+using ZapretSmart.Core.Hosts;
+using ZapretSmart.Core.Updates;
 using ZapretSmart.Core.Community;
 using ZapretSmart.Core.Lists;
 using ZapretSmart.Core.Search;
@@ -47,13 +49,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _closeToTray = _settings.CloseToTray;
         _theme = AppTheme.Find(_settings.ThemeId);
         _animatedBackdrop = _settings.AnimatedBackdrop;
+        _menuOnTop = _settings.MenuOnTop;
         Themes = AppTheme.All.Select(t => new ThemeOption(t, selected => Theme = selected) { IsSelected = t == _theme }).ToList();
 
         ListStore = new ListStore(paths.Layout, paths.BundledListsDir);
         UserStrategies = new UserStrategyStore(paths.UserStrategiesDir);
         try
         {
-            ListStore.SeedMissing();
+            foreach (var u in ListStore.SeedMissing())
+                AppendLog($"Списки: в {u.ListId}.txt из новой версии добавлено {u.Added}, убрано {u.Removed}. Ваши правки сохранены.");
         }
         catch (IOException e)
         {
@@ -66,10 +70,31 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         Blocklists = new BlocklistsViewModel(this, new ListUpdater(ListUpdater.CreateHttpClient(), paths.Layout.ListsDir, paths.Layout.IpsetsDir));
         Editor = new StrategyEditorViewModel(this);
+        var http = Releases.CreateHttpClient(CurrentVersion);
+        Hosts = new HostsViewModel(this,
+            paths.HostsFile is null ? null : new HostsManager(paths.HostsFile, paths.DataDir, paths.BundledHostsSnapshot, http),
+            _settings.HostsEnabled);
+        Updates = new UpdatesViewModel(this, http);
         Search = new SearchViewModel(this);
 
         ReloadStrategies();
         UpdateStatus();
+        ReportLastUpdate();
+    }
+
+    /// <summary>Итог установки другой версии пишет скрипт после выхода приложения; показываем его при следующем запуске.</summary>
+    private void ReportLastUpdate()
+    {
+        var log = Path.Combine(Paths.DataDir, "update.log");
+        try
+        {
+            if (!File.Exists(log) || DateTime.UtcNow - File.GetLastWriteTimeUtc(log) > TimeSpan.FromMinutes(15)) return;
+            var last = File.ReadLines(log).LastOrDefault(l => l.Trim().Length > 0);
+            if (last is not null) AppendLog((last.Contains("ошибка", StringComparison.Ordinal) ? "! " : "") + "Обновление: " + last);
+        }
+        catch (IOException)
+        {
+        }
     }
 
     public AppPaths Paths { get; }
@@ -77,6 +102,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public BlocklistsViewModel Blocklists { get; }
     public UserStrategyStore UserStrategies { get; }
     public StrategyEditorViewModel Editor { get; }
+    public HostsViewModel Hosts { get; }
+    public UpdatesViewModel Updates { get; }
     public SearchViewModel Search { get; }
 
     public ObservableCollection<StrategyItem> Strategies { get; } = [];
@@ -92,6 +119,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         typeof(MainWindowViewModel).Assembly
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
             .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion);
+
+    /// <summary>Номер этой сборки без хвоста «+коммит»: 0.3.0, 0.0.0-dev.</summary>
+    public static string CurrentVersion { get; } =
+        (typeof(MainWindowViewModel).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "0.0.0-dev")
+        .Split('+')[0];
 
     public static string FormatVersion(string? informational)
     {
@@ -110,6 +144,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _animatedBackdrop;
 
     partial void OnAnimatedBackdropChanged(bool value) => SaveSettings(_settings with { AnimatedBackdrop = value });
+
+    [ObservableProperty] private bool _menuOnTop;
+
+    partial void OnMenuOnTopChanged(bool value) => SaveSettings(_settings with { MenuOnTop = value });
 
     /// <summary>На месте «Включить» показывается «Выключить». Скрытая из пары кнопок всегда недоступна.</summary>
     public bool ShowStop => IsRunning || IsSwitching;
@@ -266,7 +304,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Фоновые задачи после показа окна. Не из конструктора: тесты создают модель без сети.</summary>
-    public void StartBackgroundWork() => _ = Blocklists.UpdateStaleAsync();
+    public void StartBackgroundWork()
+    {
+        _ = Blocklists.UpdateStaleAsync();
+        _ = Hosts.RefreshIfEnabledAsync();
+    }
+
+    public void SaveHostsEnabled(bool value) => SaveSettings(_settings with { HostsEnabled = value });
+
+    /// <summary>Установка другой версии: приложение должно закрыться, чтобы скрипт заменил файлы.</summary>
+    public event Action? ExitForUpdateRequested;
+
+    public void RequestExitForUpdate() => ExitForUpdateRequested?.Invoke();
 
     public void AppendLog(string line)
     {

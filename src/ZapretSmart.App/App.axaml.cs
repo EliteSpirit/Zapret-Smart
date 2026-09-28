@@ -45,6 +45,12 @@ public partial class App : Application
                 }
             };
             window.Closed += (_, _) => desktop.Shutdown();
+            // Установка другой версии: закрыться по-настоящему, не в трей, чтобы скрипт смог заменить файлы.
+            vm.ExitForUpdateRequested += () =>
+            {
+                window.ExitRequested = true;
+                window.Close();
+            };
 
             vm.StartBackgroundWork();
             // Обновляются только списки старше суток, так что частый таймер не создаёт лишних загрузок.
