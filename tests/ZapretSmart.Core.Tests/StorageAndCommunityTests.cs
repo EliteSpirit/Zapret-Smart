@@ -71,6 +71,60 @@ public sealed class StorageAndCommunityTests : IDisposable
         Assert.Equal(["blocked-ip"], store.IpsetIds());
     }
 
+    private (ListStore Store, EngineLayout Layout, string Bundled) BundledSetup(string bundledGeneral)
+    {
+        var bundled = Path.Combine(_dir, "bundled");
+        var layout = new EngineLayout(Path.Combine(_dir, "fake"), Path.Combine(_dir, "user"), Path.Combine(_dir, "ipsets"));
+        Directory.CreateDirectory(bundled);
+        File.WriteAllText(Path.Combine(bundled, "general.txt"), bundledGeneral);
+        return (new ListStore(layout, bundled), layout, bundled);
+    }
+
+    [Fact]
+    public void FreshInstallCopiesListAndRemembersBaseline()
+    {
+        var (store, layout, _) = BundledSetup("youtube.com\ndiscord.com\n");
+        Assert.Empty(store.SeedMissing());
+        Assert.Equal("youtube.com\ndiscord.com\n", File.ReadAllText(layout.HostlistPath("general")));
+        Assert.Equal("youtube.com\ndiscord.com\n", File.ReadAllText(Path.Combine(store.BaselineDirectory, "general.txt")));
+        // Папка с базой не должна выглядеть как список доменов.
+        Assert.DoesNotContain(".bundled", store.HostlistIds());
+    }
+
+    [Fact]
+    public void InstallFromBeforeBaselinesKeepsUserFileAsIs()
+    {
+        var (store, layout, _) = BundledSetup("youtube.com\ndiscord.com\n");
+        Directory.CreateDirectory(layout.ListsDir);
+        // Пользователь 0.3.0 удалил discord.com и дописал свой домен; базы тогда ещё не было.
+        File.WriteAllText(layout.HostlistPath("general"), "youtube.com\nmy.site\n");
+
+        Assert.Empty(store.SeedMissing());
+        Assert.Equal("youtube.com\nmy.site\n", File.ReadAllText(layout.HostlistPath("general")));
+        Assert.True(File.Exists(Path.Combine(store.BaselineDirectory, "general.txt")));
+    }
+
+    [Fact]
+    public void NewVersionListIsMergedIntoUserEdits()
+    {
+        var (store, layout, bundled) = BundledSetup("youtube.com\ndiscord.com\nold.gone\n");
+        store.SeedMissing();
+        // Правки пользователя: комментарий, свой домен, удалённый встроенный домен, другой регистр.
+        File.WriteAllText(layout.HostlistPath("general"), "# мой список\nYouTube.com\nold.gone\nmy.site\n");
+        // Новая версия: добавила два домена (один пользователь уже вписал сам) и убрала old.gone.
+        File.WriteAllText(Path.Combine(bundled, "general.txt"), "youtube.com\ndiscord.com\nnew.one\nmy.site\n");
+
+        var update = Assert.Single(store.SeedMissing());
+        Assert.Equal(new BundledListUpdate("general", 1, 1), update);
+        Assert.Equal(["# мой список", "YouTube.com", "my.site", "", "new.one"], File.ReadAllLines(layout.HostlistPath("general")));
+        // discord.com пользователь удалил сам: обратно он не возвращается.
+        Assert.DoesNotContain("discord.com", File.ReadAllText(layout.HostlistPath("general")));
+
+        // Повторный запуск той же версии ничего не меняет.
+        Assert.Empty(store.SeedMissing());
+        Assert.Equal(["# мой список", "YouTube.com", "my.site", "", "new.one"], File.ReadAllLines(layout.HostlistPath("general")));
+    }
+
     [Fact]
     public void AutoListCanBeCountedAndCleared()
     {

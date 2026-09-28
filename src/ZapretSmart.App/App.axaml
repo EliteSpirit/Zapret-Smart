@@ -81,22 +81,45 @@
     </Style>
 
     <!-- Навигация -->
+    <!--
+      Рамка окна: меню колонкой слева (по умолчанию) или строкой сверху (класс top-menu на окне).
+      Колонка узкая, 172 px: на странице с контентом до 760 px она не должна отъедать ширину.
+    -->
+    <Style Selector="Border.chrome">
+      <Setter Property="Background" Value="{DynamicResource ZsSidebar}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ZsBorder}" />
+      <Setter Property="Width" Value="172" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="BorderThickness" Value="0,0,1,0" />
+    </Style>
+    <Style Selector="StackPanel.logo">
+      <Setter Property="Margin" Value="22,20,0,0" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Spacing" Value="1" />
+    </Style>
+    <Style Selector="StackPanel.status">
+      <Setter Property="Margin" Value="22,0,0,16" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+      <Setter Property="Width" Value="140" />
+    </Style>
     <Style Selector="TabControl.nav">
       <Setter Property="TabStripPlacement" Value="Left" />
       <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="TabControl.nav /template/ ItemsPresenter#PART_ItemsPresenter">
-      <Setter Property="Margin" Value="12,72,12,12" />
+      <Setter Property="Margin" Value="10,64,10,12" />
     </Style>
     <Style Selector="TabControl.nav TabItem">
-      <Setter Property="FontSize" Value="15" />
-      <Setter Property="MinHeight" Value="40" />
-      <Setter Property="Width" Value="176" />
-      <Setter Property="Padding" Value="14,0" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="MinHeight" Value="38" />
+      <Setter Property="Width" Value="152" />
+      <Setter Property="Padding" Value="12,0" />
       <Setter Property="Margin" Value="0,2" />
       <Setter Property="CornerRadius" Value="{DynamicResource ZsControlRadius}" />
       <Setter Property="Foreground" Value="{DynamicResource ZsTextMuted}" />
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource ZsRaisedClear}" />
       <Setter Property="Transitions">
         <Transitions>
           <BrushTransition Property="Background" Duration="0:0:0.15" />
@@ -117,16 +140,61 @@
     <Style Selector="TabControl.nav TabItem:pointerover /template/ Border#PART_LayoutRoot">
       <Setter Property="Background" Value="{DynamicResource ZsHover}" />
     </Style>
+    <!-- Нажатие не красит пункт системным серым Fluent: тот же цвет, что при наведении. -->
+    <Style Selector="TabControl.nav TabItem:pressed /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="{DynamicResource ZsHover}" />
+    </Style>
     <Style Selector="TabControl.nav TabItem:selected">
       <Setter Property="Background" Value="{DynamicResource ZsSurfaceRaised}" />
       <Setter Property="Foreground" Value="{DynamicResource ZsText}" />
     </Style>
-    <Style Selector="TabControl.nav TabItem:selected /template/ Border#PART_LayoutRoot">
+    <Style Selector="TabControl.nav TabItem:selected /template/ Border#PART_LayoutRoot, TabControl.nav TabItem:selected:pressed /template/ Border#PART_LayoutRoot">
       <Setter Property="Background" Value="{DynamicResource ZsSurfaceRaised}" />
     </Style>
     <Style Selector="TabControl.nav TabItem:selected /template/ Border#PART_SelectedPipe">
       <Setter Property="Background" Value="{DynamicResource ZsAccent}" />
     </Style>
+    <!-- Меню сверху: полоса высотой 56 px, логотип слева, вкладки за ним, состояние справа. -->
+    <Style Selector="Window.top-menu Border.chrome">
+      <Setter Property="Width" Value="NaN" />
+      <Setter Property="Height" Value="56" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Window.top-menu StackPanel.logo">
+      <Setter Property="Orientation" Value="Horizontal" />
+      <Setter Property="Spacing" Value="8" />
+      <Setter Property="Margin" Value="24,0,0,0" />
+      <Setter Property="Height" Value="56" />
+    </Style>
+    <Style Selector="Window.top-menu StackPanel.status">
+      <Setter Property="Width" Value="NaN" />
+      <Setter Property="Height" Value="56" />
+      <Setter Property="Margin" Value="0,0,24,0" />
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Orientation" Value="Horizontal" />
+      <Setter Property="Spacing" Value="14" />
+    </Style>
+    <Style Selector="Window.top-menu StackPanel.status > StackPanel, Window.top-menu StackPanel.status > TextBlock">
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Window.top-menu TextBlock.version">
+      <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="Window.top-menu TabControl.nav">
+      <Setter Property="TabStripPlacement" Value="Top" />
+    </Style>
+    <Style Selector="Window.top-menu TabControl.nav /template/ ItemsPresenter#PART_ItemsPresenter">
+      <Setter Property="Margin" Value="160,8,260,8" />
+    </Style>
+    <Style Selector="Window.top-menu TabControl.nav TabItem">
+      <Setter Property="Width" Value="NaN" />
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="Margin" Value="2,0" />
+    </Style>
+
     <Style Selector="Path.icon">
       <Setter Property="Width" Value="18" />
       <Setter Property="Height" Value="18" />
@@ -190,7 +258,7 @@
     </Style>
 
     <Style Selector="Button.danger">
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource ZsDangerClear}" />
       <Setter Property="BorderBrush" Value="{DynamicResource ZsDanger}" />
       <Setter Property="Foreground" Value="{DynamicResource ZsDanger}" />
       <Setter Property="FontWeight" Value="SemiBold" />
@@ -205,14 +273,14 @@
       <Setter Property="Foreground" Value="{DynamicResource ZsDanger}" />
     </Style>
     <Style Selector="Button.danger:disabled /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource ZsDangerClear}" />
       <Setter Property="BorderBrush" Value="{DynamicResource ButtonBorderBrushDisabled}" />
       <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundDisabled}" />
     </Style>
 
     <!-- Тихая кнопка без рамки: второстепенное действие внутри карточки. -->
     <Style Selector="Button.subtle">
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource ZsRaisedClear}" />
       <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="Foreground" Value="{DynamicResource ZsTextMuted}" />
     </Style>
@@ -222,7 +290,7 @@
       <Setter Property="Foreground" Value="{DynamicResource ZsText}" />
     </Style>
     <Style Selector="Button.subtle:disabled /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource ZsRaisedClear}" />
       <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
 
@@ -309,7 +377,7 @@
       <Setter Property="Foreground" Value="{DynamicResource ZsText}" />
     </Style>
     <Style Selector="ListBox.picker ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource ZsRaisedClear}" />
       <Setter Property="Foreground" Value="{DynamicResource ZsText}" />
       <Setter Property="Transitions">
         <Transitions>
@@ -440,7 +508,7 @@
       <Setter Property="CornerRadius" Value="14" />
       <Setter Property="BorderThickness" Value="2" />
       <Setter Property="BorderBrush" Value="{DynamicResource ZsBorderStrong}" />
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource ZsAccentClear}" />
       <Setter Property="Transitions">
         <Transitions>
           <BrushTransition Property="BorderBrush" Duration="0:0:0.2" />

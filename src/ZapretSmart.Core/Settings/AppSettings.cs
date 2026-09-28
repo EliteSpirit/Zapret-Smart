@@ -24,6 +24,12 @@ public sealed record AppSettings
 
     /// <summary>Анимировать фон темы (бинарный дождь, снег и т. п.). Выключено: фон неподвижен.</summary>
     public bool AnimatedBackdrop { get; init; } = true;
+
+    /// <summary>Меню вкладок строкой сверху, а не колонкой слева: окну нужно меньше ширины.</summary>
+    public bool MenuOnTop { get; init; }
+
+    /// <summary>Свой блок в системном файле hosts. По умолчанию выключен: это изменение системного файла.</summary>
+    public bool HostsEnabled { get; init; }
 }
 
 public sealed class SettingsStore(string path)

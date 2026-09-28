@@ -8,20 +8,21 @@
         x:DataType="vm:MainWindowViewModel"
         Title="Zapret Smart"
         Icon="/Assets/app.png"
-        Width="1100" Height="720" MinWidth="900" MinHeight="560"
+        Width="1100" Height="720" MinWidth="820" MinHeight="560"
         Background="{DynamicResource ZsBackground}"
-        FontFamily="{DynamicResource ZsFont}">
+        FontFamily="{DynamicResource ZsFont}"
+        Classes.top-menu="{Binding MenuOnTop}">
 
   <!-- Frame снимается целиком при смене темы: снимок гаснет поверх новой темы (OverlayHost). -->
   <Panel x:Name="Frame">
     <c:BackdropView x:Name="Backdrop" Animated="{Binding AnimatedBackdrop}" />
 
+    <!-- Меню колонкой слева или строкой сверху (настройка «Меню сверху»): раскладку задают стили App.axaml по классу окна top-menu. -->
     <Grid>
-      <Border Width="200" HorizontalAlignment="Left" Background="{DynamicResource ZsSidebar}"
-              BorderBrush="{DynamicResource ZsBorder}" BorderThickness="0,0,1,0" />
-      <StackPanel Margin="24,22,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="2" IsHitTestVisible="False">
-        <TextBlock Text="Zapret" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource ZsText}" />
-        <TextBlock Text="SMART" FontSize="11" FontWeight="SemiBold" LetterSpacing="3" Foreground="{DynamicResource ZsAccent}" />
+      <Border Classes="chrome" />
+      <StackPanel Classes="logo" IsHitTestVisible="False">
+        <TextBlock Text="Zapret" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource ZsText}" VerticalAlignment="Center" />
+        <TextBlock Text="SMART" FontSize="11" FontWeight="SemiBold" LetterSpacing="3" Foreground="{DynamicResource ZsAccent}" VerticalAlignment="Center" />
       </StackPanel>
 
       <TabControl Classes="nav" x:Name="Tabs">
@@ -491,6 +492,14 @@
                       <TextBlock Classes="muted" Text="Выключите, если отвлекает или ноутбук греется: фон станет неподвижной картинкой. Когда в Windows выключены эффекты анимации, фон неподвижен всегда." />
                     </StackPanel>
                   </DockPanel>
+                  <DockPanel Margin="0,2,0,0">
+                    <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding MenuOnTop}"
+                                  AutomationProperties.Name="Меню сверху" Margin="16,0,0,0" />
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="title" Text="Меню сверху" FontSize="14" />
+                      <TextBlock Classes="muted" Text="Вкладки строкой над содержимым вместо колонки слева. Содержимому достаётся вся ширина окна." />
+                    </StackPanel>
+                  </DockPanel>
                 </StackPanel>
               </Border>
 
@@ -581,10 +590,83 @@
               <Border Classes="card">
                 <StackPanel Spacing="10">
                   <TextBlock Text="Свои списки" Classes="title" />
-                  <TextBlock Classes="muted" Text="Файлы .txt, по домену на строку, поддомены подхватываются сами. general.txt и новые файлы ваши, blocked.txt перезаписывается при обновлении, в exclude.txt домены, которые обход не трогает." />
+                  <TextBlock Classes="muted" Text="Файлы .txt, по домену на строку, поддомены подхватываются сами. general.txt и новые файлы ваши, blocked.txt перезаписывается при обновлении, в exclude.txt домены, которые обход не трогает. Когда новая версия приложения меняет встроенный general.txt, новые домены дописываются к вашему файлу, а ваши правки и удаления сохраняются." />
                   <SelectableTextBlock Classes="muted" Text="{Binding ListStore.Directory}" FontFamily="{DynamicResource ZsMonoFont}" FontSize="12" />
                   <Button Classes="small" Content="Открыть папку" Command="{Binding OpenListsFolderCommand}" IsEnabled="{Binding IsWindows}"
                           HorizontalAlignment="Left" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" DataContext="{Binding Hosts}" x:DataType="vm:HostsViewModel">
+                <StackPanel Spacing="10">
+                  <DockPanel>
+                    <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding IsAvailable}"
+                                  AutomationProperties.Name="Файл hosts" Margin="16,0,0,0" />
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="title" Text="Файл hosts" />
+                      <TextBlock Classes="muted" Text="Дописывает в системный hosts адреса GitHub, Telegram и Discord из списка Flowseal (MIT), чтобы они открывались при подмене DNS. Ваши записи не трогаются: блок приложения стоит между метками в конце файла, а если имя уже задано вами, главной остаётся ваша запись. Список обновляется вместе со списками блокировок." />
+                    </StackPanel>
+                  </DockPanel>
+                  <TextBlock Classes="reveal" Text="{Binding Status}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}" />
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Classes="small" Content="Обновить сейчас" Command="{Binding UpdateNowCommand}" />
+                    <ProgressBar IsIndeterminate="True" Width="60" IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <Expander Header="Записи приложения в hosts" IsVisible="{Binding Entries.Count, Converter={x:Static app:Converters.IsPositive}}">
+                    <ScrollViewer MaxHeight="180">
+                      <ItemsControl ItemsSource="{Binding Entries}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="sys:String">
+                            <TextBlock Classes="log" Text="{Binding}" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </ScrollViewer>
+                  </Expander>
+                  <TextBlock Classes="caption" IsVisible="{Binding IsAvailable}"
+                             Text="{Binding BackupPath, StringFormat='Копия файла перед каждым изменением: {0}'}" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" DataContext="{Binding Updates}" x:DataType="vm:UpdatesViewModel">
+                <StackPanel Spacing="10">
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Classes="caption" VerticalAlignment="Center"
+                               Text="{Binding Current, StringFormat='установлена {0}'}" />
+                    <TextBlock Classes="title" Text="Версия приложения" />
+                  </DockPanel>
+                  <TextBlock Classes="muted" Text="Обновление или откат на любую опубликованную версию. Архив скачивается с GitHub и сверяется по SHA-256 с файлом сумм того же релиза; при несовпадении ничего не ставится. Настройки, свои стратегии и списки остаются: они лежат отдельно, в папке данных." />
+                  <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" Margin="10,0,0,0">
+                      <Button Classes="small" Content="Проверить" Command="{Binding CheckCommand}" />
+                      <Button x:Name="InstallButton" Classes="primary small" Content="Установить" IsEnabled="{Binding CanInstallNow}">
+                        <Button.Flyout>
+                          <Flyout Placement="TopEdgeAlignedRight">
+                            <StackPanel Spacing="8" MaxWidth="280">
+                              <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}"
+                                         Text="{Binding Selected.Release.Version, StringFormat='Установить {0}?', FallbackValue=''}" />
+                              <TextBlock Classes="caption" Text="Обход выключится, приложение закроется и через несколько секунд откроется в выбранной версии. Если замена файлов не удастся, вернутся прежние." />
+                              <Button Classes="primary small" Content="Установить" Margin="0,4,0,0" Click="OnInstallConfirmed" />
+                            </StackPanel>
+                          </Flyout>
+                        </Button.Flyout>
+                      </Button>
+                    </StackPanel>
+                    <ComboBox ItemsSource="{Binding Releases}" SelectedItem="{Binding Selected}" HorizontalAlignment="Stretch"
+                              PlaceholderText="Список версий ещё не загружен" IsEnabled="{Binding !IsBusy}">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ReleaseOption">
+                          <TextBlock Text="{Binding Title}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                  </DockPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <ProgressBar IsIndeterminate="True" Width="60" IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <TextBlock Classes="caption" IsVisible="{Binding !CanInstallHere}"
+                             Text="Установка доступна в собранном приложении на Windows." />
                 </StackPanel>
               </Border>
             </StackPanel>
@@ -594,12 +676,12 @@
       </TabControl>
 
       <!-- Состояние видно с любой вкладки. -->
-      <StackPanel HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="26,0,0,18" Width="160" Spacing="3" IsHitTestVisible="False">
+      <StackPanel Classes="status" Spacing="3" IsHitTestVisible="False">
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Ellipse Width="8" Height="8" Classes="dot" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsBusy}" VerticalAlignment="Center" />
           <TextBlock Text="{Binding StatusShort}" FontSize="12" Foreground="{DynamicResource ZsText}" VerticalAlignment="Center" />
         </StackPanel>
-        <TextBlock Text="{x:Static vm:MainWindowViewModel.VersionText}" Classes="caption" Margin="16,0,0,0" />
+        <TextBlock Classes="version caption" Text="{x:Static vm:MainWindowViewModel.VersionText}" Margin="16,0,0,0" />
       </StackPanel>
     </Grid>
 

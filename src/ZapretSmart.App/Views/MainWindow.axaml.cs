@@ -165,6 +165,14 @@ public partial class MainWindow : Window
     /// Сначала удаление, потом закрытие. Не Command на кнопке: закрытие подсказки отвязывает её содержимое,
     /// привязка Command становится null, и кнопка, получив Click раньше команды, закрывала вопрос, ничего не удалив.
     /// </summary>
+    /// <summary>Как с удалением: сначала команда, потом закрытие подсказки, иначе привязка к команде отвалилась бы раньше.</summary>
+    private void OnInstallConfirmed(object? sender, RoutedEventArgs e)
+    {
+        InstallButton.Flyout?.Hide();
+        var install = _vm?.Updates.InstallCommand;
+        if (install?.CanExecute(null) == true) install.Execute(null);
+    }
+
     private void OnDeleteConfirmed(object? sender, RoutedEventArgs e)
     {
         var delete = _vm?.Editor.DeleteCommand;
