@@ -20,7 +20,7 @@ public partial class MainWindow : Window
     /// <summary>ease-out с сильным стартом: движение видно в первый же кадр.</summary>
     private static readonly Easing EaseOut = new SplineEasing(0.23, 1, 0.32, 1);
 
-    private static readonly TimeSpan ThemeFade = TimeSpan.FromMilliseconds(260);
+    private static readonly TimeSpan ThemeFade = TimeSpan.FromMilliseconds(180);
 
     private readonly Animation _pageEnter;
     private CancellationTokenSource? _pageAnimation;
@@ -33,7 +33,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         if (Motion.IsReduced) Classes.Add("reduced-motion");
-        _pageEnter = Motion.IsReduced ? Fade(TimeSpan.FromMilliseconds(120)) : RiseAndFade(TimeSpan.FromMilliseconds(180), 6);
+        _pageEnter = Motion.IsReduced ? Fade(TimeSpan.FromMilliseconds(90)) : RiseAndFade(TimeSpan.FromMilliseconds(110), 4);
 
         // Вкладки переключают часто: переход короткий и почти без движения, только чтобы смена не была рывком.
         // С клавиатуры не анимируем вовсе: стрелками листают быстро, и анимация только отставала бы от нажатий.

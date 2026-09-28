@@ -134,7 +134,8 @@ public sealed class InterfaceTests : IDisposable
         Assert.True(b.X > a.X && Math.Abs(b.Y - a.Y) < 1, $"вкладки не в строку: {a} {b}");
         // Содержимое начинается под полосой меню, а не под ней прячется.
         var page = (Visual)tabs.SelectedContent!;
-        Assert.True(page.TranslatePoint(default, w)!.Value.Y >= 56);
+        var bar = w.GetVisualDescendants().OfType<Border>().Single(x => x.Classes.Contains("chrome"));
+        Assert.True(bar.Bounds.Height > 0 && page.TranslatePoint(default, w)!.Value.Y >= bar.Bounds.Bottom);
 
         Assert.True(CreateVm().MenuOnTop);
         vm.MenuOnTop = false;
@@ -302,6 +303,27 @@ public sealed class InterfaceTests : IDisposable
         vm.AppendLog("новая строка");
         Pump(0.2);
         Assert.Equal(0, scroll.Offset.Y, 1);
+    }
+
+    /// <summary>
+    /// Полный журнал (500 строк, часть переносится) не раскладывается целиком: иначе каждый возврат на главную вкладку
+    /// стоил втрое дороже остальных. При этом прокрутка по-прежнему доходит до последней строки.
+    /// </summary>
+    [AvaloniaFact]
+    public void FullLogIsVirtualizedAndStillEndsAtTheLastLine()
+    {
+        var (vm, w) = Open();
+        for (var i = 0; i < 500; i++)
+            vm.AppendLog(i % 3 == 0 ? $"строка {i} " + string.Concat(Enumerable.Repeat("--dpi-desync=fake,multisplit ", 8)) : $"строка {i}");
+        Pump(0.3);
+
+        var lines = Named<ItemsControl>(w, "LogItems").GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsVisible).ToList();
+        Assert.InRange(lines.Count, 1, 60);
+        var scroll = Named<ScrollViewer>(w, "LogScroll");
+        Assert.Equal(scroll.Extent.Height - scroll.Viewport.Height, scroll.Offset.Y, 1);
+        var last = lines.Single(t => t.Text == vm.Log[^1]);
+        var bottom = last.TranslatePoint(new Point(0, last.Bounds.Height), scroll)!.Value.Y;
+        Assert.InRange(bottom, 0, scroll.Viewport.Height + 1);
     }
 
     [AvaloniaFact]
