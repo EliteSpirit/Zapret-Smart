@@ -73,6 +73,39 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
 
     public bool IsHotspotOn => Hotspot?.IsOn == true;
 
+    public static readonly TimeSpan ProbeDuration = TimeSpan.FromSeconds(20);
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ProbeCommand))]
+    private bool _isProbing;
+
+    [ObservableProperty] private string? _probeText;
+
+    private bool CanProbe() => IsHotspotAvailable && !IsProbing;
+
+    /// <summary>
+    /// Видит ли WinDivert трафик телефона на точке доступа без прокси. От ответа зависит, можно ли сделать
+    /// обычную раздачу: если трафик не виден, доработка движка бессмысленна.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanProbe))]
+    private async Task Probe()
+    {
+        IsProbing = true;
+        ProbeText = $"Слушаю {(int)ProbeDuration.TotalSeconds} секунд. Откройте на телефоне, подключённом к точке доступа ПК, пару сайтов. Прокси на телефоне для этой проверки должен быть выключен.";
+        try
+        {
+            var dll = Path.Combine(Path.GetDirectoryName(_main.Paths.EngineExe)!, "WinDivert.dll");
+            var r = await ForwardProbe.RunAsync(dll, ProbeDuration, CancellationToken.None);
+            ProbeText = ForwardProbe.Explain(r);
+            _main.AppendLog($"Проверка раздачи: пересылка {r.ForwardPackets}, входящие {r.InboundPackets}" + (r.Error is null ? "" : ", ошибка: " + r.Error));
+            foreach (var sample in r.Samples) _main.AppendLog("  " + sample);
+        }
+        finally
+        {
+            IsProbing = false;
+        }
+    }
+
     public string HotspotText => Hotspot switch
     {
         null => "Если телефон не в той же сети Wi-Fi, что ПК, включите точку доступа: ПК сам станет сетью Wi-Fi.",

@@ -146,7 +146,18 @@ public sealed class ShareTests : IAsyncDisposable
         proxy.ClientRejected += ip => rejected = ip;
         using var stranger = await Connect(proxy.Port);
         await Send(stranger, "CONNECT example.com:443 HTTP/1.1\r\n\r\n");
-        Assert.Equal("", await ReadUntil(stranger, "", toEnd: true));
+        // Linux закрывает такое соединение обычным FIN, Windows сбросом (клиент прислал непрочитанные данные).
+        // В обоих случаях ответа нет, и это главное.
+        string reply;
+        try
+        {
+            reply = await ReadUntil(stranger, "", toEnd: true);
+        }
+        catch (SocketException e) when (e.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionAborted)
+        {
+            reply = "";
+        }
+        Assert.Equal("", reply);
         Assert.Equal(IPAddress.Loopback, rejected);
     }
 
@@ -270,6 +281,56 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.Equal("в этом компьютере нет Wi-Fi, который умеет раздавать", WindowsHotspot.Parse("error: TechnologyNotAvailable\n").Error);
         Assert.Equal("Не найден элемент.", WindowsHotspot.Parse("error: Не найден элемент.\n").Error);
         Assert.NotNull(WindowsHotspot.Parse("").Error);
+    }
+
+    [Fact]
+    public void ProbeDescribesIpv4PacketsAndSkipsTheRest()
+    {
+        var packet = new byte[40];
+        packet[0] = 0x45; packet[8] = 63; packet[9] = 6;
+        new byte[] { 192, 168, 137, 23 }.CopyTo(packet, 12);
+        new byte[] { 142, 250, 74, 14 }.CopyTo(packet, 16);
+        packet[22] = 0x01; packet[23] = 0xBB;
+        var d = ForwardProbe.Describe(packet);
+        Assert.Equal("192.168.137.23 → 142.250.74.14:443 tcp ttl 63", d!.Value.Text);
+        Assert.Equal(IPAddress.Parse("142.250.74.14"), d.Value.Destination);
+
+        packet[9] = 1; // ICMP
+        Assert.Null(ForwardProbe.Describe(packet));
+        Assert.Null(ForwardProbe.Describe(new byte[] { 0x60, 0, 0 }));
+        Assert.Null(ForwardProbe.Describe(packet.AsSpan(0, 10)));
+    }
+
+    [Fact]
+    public void ProbeVerdictsTellWhatToDoNext()
+    {
+        Assert.Contains("пришлите", ForwardProbe.Explain(new ForwardProbeResult(12, 0, [], null)));
+        Assert.Contains("входящий", ForwardProbe.Explain(new ForwardProbeResult(0, 5, [], null)));
+        Assert.Contains("остаётся прокси", ForwardProbe.Explain(new ForwardProbeResult(0, 0, [], null)));
+        Assert.StartsWith("Проверка не удалась", ForwardProbe.Explain(ForwardProbeResult.Failed("x")));
+    }
+
+    public sealed class WinDivertFactAttribute : FactAttribute
+    {
+        public WinDivertFactAttribute()
+        {
+            if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("ZS_ENGINE") is not { Length: > 0 })
+                Skip = "нужны Windows и собранный движок с WinDivert (ZS_ENGINE)";
+        }
+    }
+
+    /// <summary>
+    /// На раннере нет точки доступа, так что пакетов не будет. Проверяется, что WinDivert открывает слой пересылки
+    /// и входящий слой с нашими фильтрами (неверный фильтр дал бы ошибку открытия) и проверка сама заканчивается.
+    /// </summary>
+    [WinDivertFact]
+    public async Task ProbeOpensTheForwardLayerAndStopsOnTime()
+    {
+        var dll = Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("ZS_ENGINE"))!, "WinDivert.dll");
+        var sw = Stopwatch.StartNew();
+        var r = await ForwardProbe.RunAsync(dll, TimeSpan.FromSeconds(1), CancellationToken.None);
+        Assert.Null(r.Error);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), sw.Elapsed.ToString());
     }
 
     public sealed class WindowsPowerShellFactAttribute : FactAttribute

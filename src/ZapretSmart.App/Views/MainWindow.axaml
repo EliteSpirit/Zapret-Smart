@@ -630,7 +630,7 @@
                       </Grid>
                     </Border>
                     <TextBlock Classes="muted" Text="iPhone: Настройки → Wi-Fi → кнопка (i) у вашей сети → Настройка прокси → Вручную, введите сервер и порт. Android: Wi-Fi → ваша сеть → Изменить → Дополнительно → Прокси → Вручную." />
-                    <TextBlock Classes="caption" Text="Вместо «Вручную» можно выбрать «Авто» (на Android «Автонастройка прокси») с адресом из строки «Авто»: тогда, если ПК выключен, телефон пойдёт в интернет напрямую. Через прокси идут браузеры и большинство приложений; звонки и голосовые чаты идут мимо ПК, без обхода." />
+                    <TextBlock Classes="caption" Text="Прокси запоминается для конкретной сети Wi-Fi. Надёжнее всего указывать его в сети точки доступа ПК: когда ПК выключен, этой сети нет, и телефон сам уйдёт в домашний Wi-Fi или мобильный интернет. Если указать «Вручную» в домашнем Wi-Fi, при выключенном ПК интернета в этой сети не будет. «Авто» (на Android «Автонастройка прокси») с адресом из строки «Авто» велит телефону идти напрямую, когда ПК недоступен. Через прокси идут браузеры и большинство приложений; звонки и голосовые чаты идут мимо ПК, без обхода." />
                     <ItemsControl ItemsSource="{Binding OtherAddresses}" IsVisible="{Binding OtherAddresses.Count, Converter={x:Static app:Converters.IsPositive}}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="sys:String">
@@ -649,6 +649,16 @@
                       <Button Classes="small subtle" Content="Обновить" Command="{Binding RefreshHotspotCommand}" />
                       <ProgressBar IsIndeterminate="True" Width="60" IsVisible="{Binding IsHotspotBusy}" VerticalAlignment="Center" />
                     </StackPanel>
+                    <DockPanel Margin="0,4,0,0">
+                      <Button DockPanel.Dock="Right" Classes="small" Content="Проверить" Command="{Binding ProbeCommand}" Margin="16,0,0,0" VerticalAlignment="Top" />
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="Обычная раздача без прокси" FontWeight="SemiBold" Foreground="{DynamicResource ZsText}" />
+                        <TextBlock Classes="caption" Text="Пока не работает: неизвестно, видит ли движок трафик устройств на точке доступа. Проверка это выясняет: включите точку доступа, подключите телефон без прокси и нажмите «Проверить». Трафик только читается, интернет и обход она не трогает." />
+                      </StackPanel>
+                    </DockPanel>
+                    <TextBlock Classes="reveal" Text="{Binding ProbeText}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}"
+                               IsVisible="{Binding ProbeText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsProbing}" />
                   </StackPanel>
                 </StackPanel>
               </Border>
