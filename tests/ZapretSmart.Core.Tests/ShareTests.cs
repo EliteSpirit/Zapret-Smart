@@ -278,6 +278,9 @@ public sealed class ShareTests : IAsyncDisposable
         var sw = Stopwatch.StartNew();
         Assert.Equal("", await ReadUntil(slow, "", toEnd: true));
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
+        // Сокет закрывается раньше, чем прокси уменьшает счётчик в finally: ждём, а не проверяем в ту же миллисекунду.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (proxy.ActiveConnections != 0 && DateTime.UtcNow < deadline) await Task.Delay(10);
         Assert.Equal(0, proxy.ActiveConnections);
     }
 
