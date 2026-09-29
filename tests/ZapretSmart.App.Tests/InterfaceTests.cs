@@ -117,6 +117,58 @@ public sealed class InterfaceTests : IDisposable
         Assert.True(worst < textOnly * 3 + 200, $"покинутый пункт вспыхнул: {worst} ярких пикселей, в покое {textOnly}");
     }
 
+    /// <summary>
+    /// Переключатель раздачи поднимает прокси (порт 0 в настройках: тест не занимает 8880), выключение его гасит,
+    /// выбор запоминается. Брандмауэр в тестах не трогается: ManageFirewall у тестовых путей выключен.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ShareSwitchStartsAndStopsTheProxyAndIsRemembered()
+    {
+        new ZapretSmart.Core.Settings.SettingsStore(Path.Combine(_data, "settings.json"))
+            .Save(new ZapretSmart.Core.Settings.AppSettings { SharePort = 0 });
+        var (vm, w) = Open();
+        w.GetVisualDescendants().OfType<TabControl>().Single().SelectedIndex = 3;
+        Pump(0.2);
+        var toggle = Named<ToggleSwitch>(w, "ShareSwitch");
+        Assert.False(toggle.IsChecked);
+
+        toggle.IsChecked = true;
+        await WaitFor(() => vm.Share.Port != 0);
+        var pac = await Fetch(vm.Share.Port, "/proxy.pac");
+        Assert.Contains($"PROXY 127.0.0.1:{vm.Share.Port}; DIRECT", pac);
+        Assert.Contains(vm.Log, l => l.Contains("прокси слушает порт", StringComparison.Ordinal));
+        using (var again = CreateVm()) Assert.True(again.Share.IsEnabled);
+
+        var port = vm.Share.Port;
+        toggle.IsChecked = false;
+        await WaitFor(() => vm.Log.Any(l => l.Contains("прокси остановлен", StringComparison.Ordinal)));
+        await Assert.ThrowsAnyAsync<System.Net.Sockets.SocketException>(() => Fetch(port, "/proxy.pac"));
+        Assert.False(vm.Share.HasAddress);
+    }
+
+    private static async Task WaitFor(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "не дождались");
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(20);
+        }
+    }
+
+    private static async Task<string> Fetch(int port, string path)
+    {
+        using var s = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        await s.ConnectAsync(System.Net.IPAddress.Loopback, port);
+        await s.SendAsync(System.Text.Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: x\r\n\r\n"), System.Net.Sockets.SocketFlags.None);
+        var buffer = new byte[8192];
+        var sb = new System.Text.StringBuilder();
+        int read;
+        while ((read = await s.ReceiveAsync(buffer, System.Net.Sockets.SocketFlags.None)) > 0) sb.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, read));
+        return sb.ToString();
+    }
+
     [AvaloniaFact]
     public void MenuOnTopPutsTabsInARowAndIsRemembered()
     {

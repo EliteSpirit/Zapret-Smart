@@ -35,10 +35,10 @@ public partial class App : Application
 
             SetUpTray(desktop, window, vm);
 
-            // Закрытие окна при работающем обходе прячет его в трей: обход продолжает работать.
+            // Закрытие окна при работающем обходе или раздаче прячет его в трей: они продолжают работать.
             window.Closing += (_, e) =>
             {
-                if (!window.ExitRequested && vm.IsRunning && vm.CloseToTray)
+                if (!window.ExitRequested && (vm.IsRunning || vm.Share.IsEnabled) && vm.CloseToTray)
                 {
                     e.Cancel = true;
                     window.Hide();

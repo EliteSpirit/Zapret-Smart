@@ -601,6 +601,58 @@
                 </StackPanel>
               </Border>
 
+              <!-- Раздача: телефон ходит в интернет через прокси на ПК, и обход обрабатывает его соединения. -->
+              <Border Classes="card" DataContext="{Binding Share}" x:DataType="vm:ShareViewModel">
+                <StackPanel Spacing="10">
+                  <DockPanel>
+                    <ToggleSwitch x:Name="ShareSwitch" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding IsEnabled}"
+                                  AutomationProperties.Name="Раздача на телефон" Margin="16,0,0,0" />
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="title" Text="Раздача на телефон" />
+                      <TextBlock Classes="muted" Text="iPhone, Android или телевизор ходят в интернет через этот ПК, и обход работает и для них. На телефон ничего ставить не нужно: достаточно указать прокси в настройках Wi-Fi. Работает, пока ПК включён и приложение запущено." />
+                    </StackPanel>
+                  </DockPanel>
+                  <TextBlock Classes="reveal" Text="{Binding Status}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}"
+                             IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                  <StackPanel Spacing="10" IsVisible="{Binding HasAddress}" Classes="reveal">
+                    <Border Classes="code">
+                      <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto">
+                        <TextBlock Grid.Row="0" Classes="caption" Text="Сервер" Margin="0,0,16,4" />
+                        <SelectableTextBlock x:Name="ShareAddress" Grid.Row="0" Grid.Column="1" Text="{Binding Address}"
+                                             FontFamily="{DynamicResource ZsMonoFont}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ZsText}" />
+                        <TextBlock Grid.Row="1" Classes="caption" Text="Порт" Margin="0,0,16,4" />
+                        <SelectableTextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Port}"
+                                             FontFamily="{DynamicResource ZsMonoFont}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ZsText}" />
+                        <TextBlock Grid.Row="2" Classes="caption" Text="Авто" Margin="0,0,16,0" />
+                        <SelectableTextBlock Grid.Row="2" Grid.Column="1" Text="{Binding PacUrl}"
+                                             FontFamily="{DynamicResource ZsMonoFont}" FontSize="12" Foreground="{DynamicResource ZsTextMuted}" />
+                      </Grid>
+                    </Border>
+                    <TextBlock Classes="muted" Text="iPhone: Настройки → Wi-Fi → кнопка (i) у вашей сети → Настройка прокси → Вручную, введите сервер и порт. Android: Wi-Fi → ваша сеть → Изменить → Дополнительно → Прокси → Вручную." />
+                    <TextBlock Classes="caption" Text="Вместо «Вручную» можно выбрать «Авто» (на Android «Автонастройка прокси») с адресом из строки «Авто»: тогда, если ПК выключен, телефон пойдёт в интернет напрямую. Через прокси идут браузеры и большинство приложений; звонки и голосовые чаты идут мимо ПК, без обхода." />
+                    <ItemsControl ItemsSource="{Binding OtherAddresses}" IsVisible="{Binding OtherAddresses.Count, Converter={x:Static app:Converters.IsPositive}}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="sys:String">
+                          <TextBlock Classes="caption" Text="{Binding StringFormat='Если телефон в другой сети: {0}'}" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="caption" Text="{Binding LastClient}" IsVisible="{Binding LastClient, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="8" IsVisible="{Binding IsHotspotAvailable}">
+                    <TextBlock Text="{Binding HotspotText}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button Classes="small" Content="Включить точку доступа" Command="{Binding StartHotspotCommand}" IsVisible="{Binding !IsHotspotOn}" />
+                      <Button Classes="small" Content="Выключить точку доступа" Command="{Binding StopHotspotCommand}" IsVisible="{Binding IsHotspotOn}" />
+                      <Button Classes="small subtle" Content="Обновить" Command="{Binding RefreshHotspotCommand}" />
+                      <ProgressBar IsIndeterminate="True" Width="60" IsVisible="{Binding IsHotspotBusy}" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+
               <Border Classes="card" DataContext="{Binding Hosts}" x:DataType="vm:HostsViewModel">
                 <StackPanel Spacing="10">
                   <DockPanel>
