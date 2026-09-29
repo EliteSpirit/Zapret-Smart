@@ -303,9 +303,11 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.Equal("com.apple.wifi.managed", PlistValue(doc, "PayloadType"));
         Assert.Equal(wifi.Ssid, PlistValue(doc, "SSID_STR"));
         Assert.Equal(wifi.Passphrase, PlistValue(doc, "Password"));
-        Assert.Equal("Manual", PlistValue(doc, "ProxyType"));
-        Assert.Equal("192.168.137.1", PlistValue(doc, "ProxyServer"));
-        Assert.Equal("8880", PlistValue(doc, "ProxyServerPort"));
+        // Автонастройка с запасным «напрямую», а не ручной прокси: без приложения iPhone не должен остаться без интернета.
+        Assert.Equal("Auto", PlistValue(doc, "ProxyType"));
+        Assert.Equal("http://192.168.137.1:8880/proxy.pac", PlistValue(doc, "ProxyPACURL"));
+        Assert.Equal("true", PlistValue(doc, "ProxyPACFallbackAllowed"));
+        Assert.Null(PlistValue(doc, "ProxyServer"));
         Assert.Equal("true", PlistValue(doc, "AutoJoin"));
 
         // Повторная установка должна заменить профиль, а не добавить второй: UUID и идентификатор постоянные.
@@ -336,7 +338,7 @@ public sealed class ShareTests : IAsyncDisposable
             Assert.StartsWith("HTTP/1.1 200", response);
             Assert.Contains("Content-Type: application/x-apple-aspen-config", response);
             Assert.Contains("<string>Zapret-PC</string>", response);
-            Assert.Contains($"<integer>{proxy.Port}</integer>", response);
+            Assert.Contains($"<string>http://192.168.137.1:{proxy.Port}/proxy.pac</string>", response);
         }
     }
 

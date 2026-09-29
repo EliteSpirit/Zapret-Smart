@@ -9,7 +9,11 @@ namespace ZapretSmart.Core.Share;
 public sealed record WifiNetwork(string Ssid, string Passphrase, IPAddress ProxyAddress);
 
 /// <summary>
-/// Профиль конфигурации iOS (.mobileconfig) с одной сетью Wi-Fi и ручным прокси. Такие профили ставятся без MDM:
+/// Профиль конфигурации iOS (.mobileconfig) с одной сетью Wi-Fi и автонастройкой прокси.
+/// Прокси не «ручной», а через файл proxy.pac на ПК: так iPhone не остаётся без интернета, если приложение упало
+/// или закрыто, а точка доступа ещё работает. Страховка двойная: ProxyPACFallbackAllowed разрешает идти напрямую,
+/// если сам файл недоступен, а в файле указано «PROXY ...; DIRECT», и при недоступном прокси iOS переходит
+/// на прямое соединение для каждого нового соединения. Интервала проверки в настройках iOS нет, его решает система. Такие профили ставятся без MDM:
 /// Safari скачивает файл, пользователь подтверждает установку в Настройках. Профиль не подписан, iOS так и покажет.
 /// Идентификаторы постоянные, поэтому повторная установка заменяет прежний профиль, а не добавляет второй.
 /// </summary>
@@ -38,13 +42,13 @@ public static class IphoneProfile
                   <key>AutoJoin</key><true/>
                   <key>EncryptionType</key><string>Any</string>
                   <key>Password</key><string>{E(wifi.Passphrase)}</string>
-                  <key>ProxyType</key><string>Manual</string>
-                  <key>ProxyServer</key><string>{wifi.ProxyAddress}</string>
-                  <key>ProxyServerPort</key><integer>{port}</integer>
+                  <key>ProxyType</key><string>Auto</string>
+                  <key>ProxyPACURL</key><string>{PacUrl(wifi, port)}</string>
+                  <key>ProxyPACFallbackAllowed</key><true/>
                 </dict>
               </array>
               <key>PayloadDisplayName</key><string>Zapret Smart: раздача с ПК</string>
-              <key>PayloadDescription</key><string>Подключает iPhone к сети ПК «{E(wifi.Ssid)}» с прокси {wifi.ProxyAddress}:{port}, через который работает обход блокировок. Удалить: Настройки → Основные → VPN и управление устройством.</string>
+              <key>PayloadDescription</key><string>Подключает iPhone к сети ПК «{E(wifi.Ssid)}» и направляет интернет через прокси {wifi.ProxyAddress}:{port}, на котором работает обход блокировок. Если прокси не отвечает, iPhone идёт в интернет напрямую. Удалить: Настройки → Основные → VPN и управление устройством.</string>
               <key>PayloadIdentifier</key><string>{Identifier}</string>
               <key>PayloadType</key><string>Configuration</string>
               <key>PayloadUUID</key><string>{Uuid("profile")}</string>
@@ -55,6 +59,8 @@ public static class IphoneProfile
 
             """;
     }
+
+    public static string PacUrl(WifiNetwork wifi, int port) => $"http://{wifi.ProxyAddress}:{port}/proxy.pac";
 
     /// <summary>Постоянный UUID из строки: один и тот же у каждой сборки профиля.</summary>
     private static string Uuid(string name)
