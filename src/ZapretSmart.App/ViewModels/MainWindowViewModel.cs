@@ -292,6 +292,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         SelectedStrategy = Strategies.FirstOrDefault(s => s.Strategy.Id == selectId) ?? Strategies.FirstOrDefault();
         Editor.SyncWith(Strategies);
+        Share.OnStrategiesReloaded(_settings.ShareStrategyId);
     }
 
     [RelayCommand]
@@ -316,6 +317,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void SaveShareEnabled(bool value) => SaveSettings(_settings with { ShareEnabled = value });
 
+    public void SaveShareStrategy(string? id) => SaveSettings(_settings with { ShareStrategyId = id });
+
     /// <summary>Установка другой версии: приложение должно закрыться, чтобы скрипт заменил файлы.</summary>
     public event Action? ExitForUpdateRequested;
 
@@ -337,8 +340,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void UpdateStatus()
     {
-        // Статус может смениться ещё в конструкторе, до создания Share.
-        Share?.OnBypassChanged();
         StatusText = !IsWindows ? "Движок работает только под Windows"
             : IsSwitching ? "Сторож подбирает стратегию"
             : IsSearching ? "Идёт поиск стратегии"

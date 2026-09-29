@@ -4,13 +4,15 @@ using System.Net.Sockets;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ZapretSmart.Core.Engine;
 using ZapretSmart.Core.Share;
 
 namespace ZapretSmart.App.ViewModels;
 
 /// <summary>
-/// Раздача обхода на телефон. Прокси на ПК открывает соединения телефона от своего имени, поэтому движок обхода
-/// обрабатывает их как свои. Точка доступа Windows нужна, только если ПК и телефон не в одной сети Wi-Fi.
+/// Раздача обхода на телефон, отдельная служба рядом с обходом ПК. Прокси открывает соединения телефона от имени ПК
+/// с портов EngineCommandBuilder.ShareLocalPorts, и их обрабатывает собственный движок раздачи со своей стратегией.
+/// Обход ПК эти порты пропускает, так что каждую службу можно включать и выключать, не трогая другую.
 /// </summary>
 public sealed partial class ShareViewModel : ObservableObject, IDisposable
 {
@@ -21,6 +23,9 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     private bool _startedHotspot;
     private readonly HashSet<IPAddress> _reportedStrangers = [];
     private ShareProxy? _proxy;
+    private EngineRunner? _engine;
+    private bool _engineStopRequested;
+    private bool _reportedExhausted;
     private bool _loading;
 
     public ShareViewModel(MainWindowViewModel main, int port, bool manageSystem, bool enabled)
@@ -35,6 +40,107 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     }
 
     public bool IsHotspotAvailable => OperatingSystem.IsWindows();
+
+    /// <summary>Движок раздачи запускается, если он есть: в поставке это только Windows-сборка.</summary>
+    public bool CanRunEngine => File.Exists(_main.Paths.EngineExe);
+
+    /// <summary>Те же стратегии, что у обхода ПК; выбор у раздачи свой.</summary>
+    public IReadOnlyList<StrategyItem> Strategies => _main.Strategies;
+
+    [ObservableProperty] private StrategyItem? _strategy;
+
+    [ObservableProperty] private bool _isEngineRunning;
+
+    private bool _syncingStrategy;
+
+    /// <summary>Список стратегий пересобран: находим выбранную раздачей по id (по умолчанию — стратегию обхода ПК).</summary>
+    public void OnStrategiesReloaded(string? savedId)
+    {
+        var id = Strategy?.Strategy.Id ?? savedId;
+        _syncingStrategy = true;
+        Strategy = _main.Strategies.FirstOrDefault(s => s.Strategy.Id == id) ?? _main.SelectedStrategy;
+        _syncingStrategy = false;
+        if (_proxy is not null && _engine is null) StartEngine();
+    }
+
+    partial void OnStrategyChanged(StrategyItem? value)
+    {
+        if (_syncingStrategy || _loading) return;
+        _main.SaveShareStrategy(value?.Strategy.Id);
+        // Другая стратегия во время работы: перезапускаем только движок раздачи, обход ПК не трогается.
+        if (_engine is not null) _ = RestartEngineAsync();
+    }
+
+    private async Task RestartEngineAsync()
+    {
+        await StopEngineAsync();
+        if (_proxy is not null) StartEngine();
+    }
+
+    private void StartEngine()
+    {
+        if (_engine is not null || Strategy is null) return;
+        if (!CanRunEngine)
+        {
+            Status = "Движок обхода работает только в Windows: телефон получит интернет, но без обхода.";
+            return;
+        }
+        EngineCommand cmd;
+        try
+        {
+            cmd = EngineCommandBuilder.Build(Strategy.Strategy, _main.Paths.Layout, EngineScope.Share);
+        }
+        catch (StrategyRejectedException e)
+        {
+            foreach (var err in e.Errors) _main.AppendLog("! Раздача: " + err);
+            Status = "Стратегия раздачи не прошла проверку, обхода для телефона нет.";
+            return;
+        }
+        foreach (var w in cmd.Warnings) _main.AppendLog("! Раздача: " + w);
+        _main.AppendLog("Раздача: > winws " + string.Join(' ', cmd.Argv));
+        var runner = new EngineRunner(_main.Paths.EngineExe);
+        // stderr EngineRunner тоже отдаёт через Output, отдельная подписка на ErrorOutput удвоила бы строки.
+        runner.Output += line => Dispatcher.UIThread.Post(() => _main.AppendLog("[раздача] " + line));
+        runner.Exited += code => Dispatcher.UIThread.Post(() => OnEngineExited(runner, code));
+        _engineStopRequested = false;
+        try
+        {
+            runner.Start(cmd.Argv);
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            runner.Dispose();
+            _main.AppendLog("! Раздача: не удалось запустить движок: " + e.Message);
+            Status = "Не удалось запустить движок раздачи, обхода для телефона нет.";
+            return;
+        }
+        _engine = runner;
+        IsEngineRunning = true;
+        Status = $"Раздача работает, стратегия «{Strategy.Name}».";
+    }
+
+    private void OnEngineExited(EngineRunner runner, int code)
+    {
+        if (_engine != runner) return;
+        _engine = null;
+        IsEngineRunning = false;
+        runner.Dispose();
+        if (_engineStopRequested) return;
+        _main.AppendLog($"! Раздача: движок завершился с кодом {code}");
+        Status = "Движок раздачи остановился, телефон получает интернет без обхода. Выключите и включите раздачу или выберите другую стратегию.";
+    }
+
+    private async Task StopEngineAsync()
+    {
+        var runner = _engine;
+        if (runner is null) return;
+        _engineStopRequested = true;
+        _engine = null;
+        IsEngineRunning = false;
+        await runner.StopAsync();
+        runner.Dispose();
+        _main.AppendLog("Раздача: движок остановлен");
+    }
 
     /// <summary>Порт, на котором прокси слушает. До запуска — порт из настроек.</summary>
     [ObservableProperty]
@@ -152,7 +258,13 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     private async Task StartAsync()
     {
         if (_proxy is not null) return;
-        var proxy = new ShareProxy(new ShareProxyOptions { Port = Port, Wifi = CurrentWifi });
+        var proxy = new ShareProxy(new ShareProxyOptions
+        {
+            Port = Port,
+            Wifi = CurrentWifi,
+            // Без движка раздачи (не Windows) порты не важны; в Windows по ним движок раздачи находит свой трафик.
+            OutboundPorts = OperatingSystem.IsWindows() ? EngineCommandBuilder.ShareLocalPorts : null,
+        });
         try
         {
             proxy.Start();
@@ -172,9 +284,16 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         {
             if (_reportedStrangers.Add(ip)) _main.AppendLog($"! Раздача: отклонено подключение не из локальной сети ({ip})");
         });
+        proxy.OutboundPortsExhausted += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (_reportedExhausted) return;
+            _reportedExhausted = true;
+            var (low, high) = EngineCommandBuilder.ShareLocalPorts;
+            _main.AppendLog($"! Раздача: заняты все порты {low}–{high}, часть соединений телефона идёт без обхода");
+        });
         RefreshAddresses();
-        Status = _main.IsRunning ? "Раздача работает." : "Прокси работает, но обход выключен: телефон получит интернет без обхода.";
         _main.AppendLog($"Раздача: прокси слушает порт {Port}");
+        StartEngine();
 
         if (_manageSystem && Environment.ProcessPath is { } exe)
         {
@@ -223,6 +342,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
             await proxy.DisposeAsync();
             _main.AppendLog("Раздача: прокси остановлен");
         }
+        await StopEngineAsync();
         Address = null;
         OtherAddresses.Clear();
         LastClient = null;
@@ -234,13 +354,6 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
             await RunHotspotAsync(HotspotAction.Stop);
             _main.AppendLog("Раздача: точка доступа выключена");
         }
-    }
-
-    /// <summary>Статус обхода сменился: подсказка в карточке должна это отражать.</summary>
-    public void OnBypassChanged()
-    {
-        if (_proxy is not null)
-            Status = _main.IsRunning ? "Раздача работает." : "Прокси работает, но обход выключен: телефон получит интернет без обхода.";
     }
 
     [RelayCommand]
@@ -305,6 +418,11 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         _proxy = null;
         // Правило брандмауэра остаётся: раздача включена и при следующем запуске поднимется снова.
         proxy?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
+        // Движок раздачи: Dispose убивает процесс синхронно (как у обхода ПК), Job Object подстрахует при падении.
+        var engine = _engine;
+        _engine = null;
+        _engineStopRequested = true;
+        engine?.Dispose();
         // Точку доступа, которую включило приложение, гасим: без приложения в ней нет прокси, и телефон
         // с профилем остался бы в сети без интернета. Нет сети — телефон сам уйдёт в домашний Wi-Fi или сотовую сеть.
         if (_startedHotspot)

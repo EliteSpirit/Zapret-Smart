@@ -28,10 +28,11 @@ public sealed class EngineLiveTests : IDisposable
         File.WriteAllLines(Path.Combine(_lists, SearchOptions.TargetsListId + ".txt"), ["example.com", "www.google.com"]);
     }
 
-    private WinwsEngineHost Host() => new(
+    private WinwsEngineHost Host(EngineScope scope = EngineScope.Pc) => new(
         Engine!,
         new EngineLayout(Path.Combine(Path.GetDirectoryName(Engine!)!, "fake"), _lists, _lists),
-        TimeSpan.FromSeconds(20));
+        TimeSpan.FromSeconds(20),
+        scope);
 
     private static readonly Candidate PlainSplit = new("multisplit", ["dpi-desync=multisplit", "dpi-desync-split-pos=1,midsld"]);
 
@@ -53,6 +54,22 @@ public sealed class EngineLiveTests : IDisposable
         {
             var e = await Assert.ThrowsAsync<EngineStartException>(() => Host().StartAsync(s, CancellationToken.None));
             Assert.Contains("already running", e.Message);
+        }
+    }
+
+    /// <summary>
+    /// Основной обход и раздача — два независимых движка с одинаковым --wf-tcp. Без хэша --wf-lport в имени
+    /// мьютекса второй не запустился бы («already running»). Трафик ПК при этом идёт через обход как обычно.
+    /// </summary>
+    [LiveFact]
+    public async Task PcAndShareEnginesRunSideBySide()
+    {
+        var s = CandidateGenerator.ToProbeStrategy(PlainSplit, SearchOptions.TargetsListId);
+        await using (await Host().StartAsync(s, CancellationToken.None))
+        await using (await Host(EngineScope.Share).StartAsync(s, CancellationToken.None))
+        {
+            var r = await new HttpsProber(TimeSpan.FromSeconds(15)).ProbeAsync("www.google.com", CancellationToken.None);
+            Assert.True(r.Ok, r.Error);
         }
     }
 

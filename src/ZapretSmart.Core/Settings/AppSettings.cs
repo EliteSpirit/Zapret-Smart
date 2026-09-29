@@ -34,6 +34,9 @@ public sealed record AppSettings
     /// <summary>Прокси для телефона в локальной сети: его соединения открывает ПК, и обход их обрабатывает. По умолчанию выключен.</summary>
     public bool ShareEnabled { get; init; }
 
+    /// <summary>Стратегия движка раздачи. Пусто — та же, что выбрана для обхода ПК.</summary>
+    public string? ShareStrategyId { get; init; }
+
     /// <summary>Порт прокси для телефона.</summary>
     public int SharePort { get; init; } = Share.ShareProxy.DefaultPort;
 }

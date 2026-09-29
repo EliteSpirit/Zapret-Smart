@@ -1794,6 +1794,8 @@ static void exithelp(void)
 		" --wf-filter-lan=0|1\t\t\t\t\t; add excluding filter for non-global IP (default : 1)\n"
 		" --wf-raw=<filter>|@<filename>\t\t\t\t; full raw windivert filter string or filename. replaces --wf-tcp,--wf-udp,--wf-raw-part\n"
 		" --wf-save=<filename>\t\t\t\t\t; save windivert filter string to a file and exit\n"
+		" --wf-lport=<port1>-<port2>\t\t\t\t; zapret-smart: process only TCP connections with a local port in the range\n"
+		" --wf-lport-exclude=<port1>-<port2>\t\t\t; zapret-smart: skip TCP connections with a local port in the range\n"
 		"\nLOGICAL NETWORK FILTER:\n"
 		" --ssid-filter=ssid1[,ssid2,ssid3,...]\t\t\t; enable winws only if any of specified wifi SSIDs connected\n"
 		" --nlm-filter=net1[,net2,net3,...]\t\t\t; enable winws only if any of specified NLM network is connected. names and GUIDs are accepted.\n"
@@ -2132,6 +2134,8 @@ enum opt_indices {
 	IDX_WF_RAW_PART,
 	IDX_WF_FILTER_LAN,
 	IDX_WF_SAVE,
+	IDX_WF_LPORT,
+	IDX_WF_LPORT_EXCLUDE,
 	IDX_SSID_FILTER,
 	IDX_NLM_FILTER,
 	IDX_NLM_LIST,
@@ -2273,6 +2277,8 @@ static const struct option long_options[] = {
 	[IDX_WF_RAW_PART] = {"wf-raw-part", required_argument, 0, 0},
 	[IDX_WF_FILTER_LAN] = {"wf-filter-lan", required_argument, 0, 0},
 	[IDX_WF_SAVE] = {"wf-save", required_argument, 0, 0},
+	[IDX_WF_LPORT] = {"wf-lport", required_argument, 0, 0},
+	[IDX_WF_LPORT_EXCLUDE] = {"wf-lport-exclude", required_argument, 0, 0},
 	[IDX_SSID_FILTER] = {"ssid-filter", required_argument, 0, 0},
 	[IDX_NLM_FILTER] = {"nlm-filter", required_argument, 0, 0},
 	[IDX_NLM_LIST] = {"nlm-list", optional_argument, 0, 0},
@@ -2302,6 +2308,10 @@ int main(int argc, char **argv)
 	bool wf_ipv4 = true, wf_ipv6 = true, wf_filter_lan = true;
 	unsigned int IfIdx = 0, SubIfIdx = 0;
 	unsigned int hash_wf_tcp = 0, hash_wf_udp = 0, hash_wf_raw = 0, hash_wf_raw_part = 0, hash_ssid_filter = 0, hash_nlm_filter = 0;
+	// zapret-smart: split traffic between two winws instances by local TCP port (the share proxy binds its
+	// outgoing sockets to a dedicated range). One instance gets --wf-lport, the other --wf-lport-exclude.
+	unsigned int wf_lport_lo = 0, wf_lport_hi = 0, hash_wf_lport = 0;
+	bool wf_lport_exclude = false;
 	*windivert_filter = *wf_pf_tcp_src = *wf_pf_tcp_dst = *wf_pf_udp_src = *wf_pf_udp_dst = *wf_save_file = 0;
 #endif
 
@@ -3403,6 +3413,20 @@ int main(int argc, char **argv)
 			strncpy(wf_save_file, optarg, sizeof(wf_save_file));
 			wf_save_file[sizeof(wf_save_file) - 1] = '\0';
 			break;
+		case IDX_WF_LPORT:
+		case IDX_WF_LPORT_EXCLUDE:
+			{
+				char tail;
+				if (wf_lport_hi || sscanf(optarg, "%u-%u%c", &wf_lport_lo, &wf_lport_hi, &tail) != 2 ||
+					!wf_lport_lo || wf_lport_lo > wf_lport_hi || wf_lport_hi > 65535)
+				{
+					DLOG_ERR("bad value for --wf-lport / --wf-lport-exclude (need one range lo-hi, 1..65535)\n");
+					exit_clean(1);
+				}
+				wf_lport_exclude = option_index == IDX_WF_LPORT_EXCLUDE;
+				hash_wf_lport = hash_jen(optarg, strlen(optarg)) ^ (wf_lport_exclude ? 0x9E3779B9u : 0);
+			}
+			break;
 		case IDX_SSID_FILTER:
 			hash_ssid_filter = hash_jen(optarg, strlen(optarg));
 			if (!parse_strlist(optarg, &params.ssid_filter))
@@ -3560,6 +3584,20 @@ int main(int argc, char **argv)
 			DLOG_ERR("windivert filter : could not make filter\n");
 			exit_clean(1);
 		}
+		if (wf_lport_hi)
+		{
+			char lport[256];
+			snprintf(lport, sizeof(lport),
+				"(tcp and (outbound and tcp.SrcPort >= %u and tcp.SrcPort <= %u or inbound and tcp.DstPort >= %u and tcp.DstPort <= %u))",
+				wf_lport_lo, wf_lport_hi, wf_lport_lo, wf_lport_hi);
+			if (strlen(windivert_filter) + strlen(lport) + 16 >= sizeof(windivert_filter))
+			{
+				DLOG_ERR("windivert filter : too long\n");
+				exit_clean(1);
+			}
+			snprintf(windivert_filter + strlen(windivert_filter), sizeof(windivert_filter) - strlen(windivert_filter),
+				"\nand\n%s%s\n", wf_lport_exclude ? "!" : "", lport);
+		}
 	}
 	DLOG("windivert filter size: %zu\nwindivert filter:\n%s\n", strlen(windivert_filter), windivert_filter);
 	if (*wf_save_file)
@@ -3577,8 +3615,9 @@ int main(int argc, char **argv)
 	}
 	HANDLE hMutexArg;
 	{
-		char mutex_name[128];
-		snprintf(mutex_name, sizeof(mutex_name), "Global\\winws_arg_%u_%u_%u_%u_%u_%u_%u_%u_%u_%u", hash_wf_tcp, hash_wf_udp, hash_wf_raw, hash_wf_raw_part, hash_ssid_filter, hash_nlm_filter, IfIdx, SubIfIdx, wf_ipv4, wf_ipv6);
+		char mutex_name[192];
+		// zapret-smart: hash_wf_lport lets the proxy instance run next to the main one with the same --wf-tcp.
+		snprintf(mutex_name, sizeof(mutex_name), "Global\\winws_arg_%u_%u_%u_%u_%u_%u_%u_%u_%u_%u_%u", hash_wf_tcp, hash_wf_udp, hash_wf_raw, hash_wf_raw_part, hash_ssid_filter, hash_nlm_filter, IfIdx, SubIfIdx, wf_ipv4, wf_ipv6, hash_wf_lport);
 
 		hMutexArg = CreateMutexA(NULL, TRUE, mutex_name);
 		if (hMutexArg && GetLastError() == ERROR_ALREADY_EXISTS)

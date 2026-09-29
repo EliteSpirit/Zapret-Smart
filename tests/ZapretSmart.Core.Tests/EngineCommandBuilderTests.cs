@@ -51,6 +51,7 @@ public sealed class EngineCommandBuilderTests : IDisposable
         [
             "--wf-tcp=443",
             "--wf-udp=443",
+            "--wf-lport-exclude=45000-48999",
             "--filter-udp=443",
             "--dpi-desync=fake",
             "--new",
@@ -61,6 +62,32 @@ public sealed class EngineCommandBuilderTests : IDisposable
             "--dpi-desync-fake-tls=" + Path.Combine(_layout.FakeDir, "tls_clienthello_www_google_com.bin"),
             "--dpi-desync-autottl",
         ], cmd.Argv);
+    }
+
+    /// <summary>
+    /// Основной обход и раздача делят трафик по исходящему порту прокси: раздача берёт только диапазон прокси,
+    /// всё остальное (обход ПК, поиск, сторож) его пропускает. Иначе пакет прокси обрабатывался бы дважды.
+    /// </summary>
+    [Fact]
+    public void ShareScopeTakesOnlyProxyPortsAndEverythingElseSkipsThem()
+    {
+        var s = One(new Profile { Args = ["dpi-desync=fake"] });
+        var pc = EngineCommandBuilder.Build(s, _layout).Argv;
+        var share = EngineCommandBuilder.Build(s, _layout, EngineScope.Share).Argv;
+        var (low, high) = EngineCommandBuilder.ShareLocalPorts;
+
+        Assert.Contains($"--wf-lport-exclude={low}-{high}", pc);
+        Assert.DoesNotContain(pc, a => a.StartsWith("--wf-lport=", StringComparison.Ordinal));
+        Assert.Contains($"--wf-lport={low}-{high}", share);
+        Assert.DoesNotContain(share, a => a.StartsWith("--wf-lport-exclude", StringComparison.Ordinal));
+        Assert.True(high < 49152, "диапазон не должен пересекаться с динамическими портами Windows");
+
+        var udpOnly = EngineCommandBuilder.Build(new Strategy
+        {
+            Id = "u", Name = "u", Intercept = new Intercept { Udp = "443" },
+            Profiles = [new Profile { Args = ["filter-udp=443", "dpi-desync=fake"] }],
+        }, _layout, EngineScope.Share);
+        Assert.Contains(udpOnly.Warnings, w => w.Contains("только TCP", StringComparison.Ordinal));
     }
 
     [Fact]

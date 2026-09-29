@@ -609,8 +609,18 @@
                                   AutomationProperties.Name="Раздача на телефон" Margin="16,0,0,0" />
                     <StackPanel Spacing="4">
                       <TextBlock Classes="title" Text="Раздача на телефон" />
-                      <TextBlock Classes="muted" Text="iPhone, Android или телевизор ходят в интернет через этот ПК, и обход работает и для них. На телефон ничего ставить не нужно: достаточно указать прокси в настройках Wi-Fi. Работает, пока ПК включён и приложение запущено." />
+                      <TextBlock Classes="muted" Text="iPhone, Android или телевизор ходят в интернет через этот ПК со своим обходом. Раздача не зависит от обхода на главной: их можно включать и выключать по отдельности, и стратегия у раздачи своя. Работает, пока ПК включён и приложение запущено." />
                     </StackPanel>
+                  </DockPanel>
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Classes="caption" Text="Стратегия для телефона" VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <ComboBox x:Name="ShareStrategy" ItemsSource="{Binding Strategies}" SelectedItem="{Binding Strategy}" HorizontalAlignment="Stretch">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:StrategyItem">
+                          <TextBlock Text="{Binding Name}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
                   </DockPanel>
                   <TextBlock Classes="reveal" Text="{Binding Status}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}"
                              IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />

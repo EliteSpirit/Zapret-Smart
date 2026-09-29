@@ -24,11 +24,11 @@ public sealed class InterfaceTests : IDisposable
 {
     private readonly string _data = Path.Combine(Path.GetTempPath(), "zs-ui-" + Guid.NewGuid().ToString("N"));
 
-    private MainWindowViewModel CreateVm()
+    private MainWindowViewModel CreateVm(string? engine = null)
     {
         var bin = AppContext.BaseDirectory;
         return new MainWindowViewModel(new AppPaths(
-            Path.Combine(bin, "engine", "winws.exe"),
+            engine ?? Path.Combine(bin, "engine", "winws.exe"),
             new EngineLayout(Path.Combine(bin, "engine", "fake"), Path.Combine(_data, "lists"), Path.Combine(_data, "ipsets")),
             Path.Combine(bin, "lists"),
             Path.Combine(bin, "strategies"),
@@ -144,6 +144,50 @@ public sealed class InterfaceTests : IDisposable
         await WaitFor(() => vm.Log.Any(l => l.Contains("прокси остановлен", StringComparison.Ordinal)));
         await Assert.ThrowsAnyAsync<System.Net.Sockets.SocketException>(() => Fetch(port, "/proxy.pac"));
         Assert.False(vm.Share.HasAddress);
+    }
+
+    /// <summary>
+    /// Раздача и обход ПК — две службы. Поддельный движок (скрипт) записывает аргументы: у раздачи свой процесс
+    /// с --wf-lport, своя стратегия, свой переключатель, а обход ПК всё это время выключен и его выбор не меняется.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ShareRunsItsOwnEngineIndependentlyOfTheMainBypass()
+    {
+        if (OperatingSystem.IsWindows()) return; // поддельный движок здесь — shell-скрипт
+        Directory.CreateDirectory(_data);
+        var args = Path.Combine(_data, "share-args");
+        var engine = Path.Combine(_data, "fake-winws");
+        File.WriteAllText(engine, $"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{args}.tmp' && mv '{args}.tmp' '{args}'\nexec sleep 30\n");
+        File.SetUnixFileMode(engine, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        new ZapretSmart.Core.Settings.SettingsStore(Path.Combine(_data, "settings.json"))
+            .Save(new ZapretSmart.Core.Settings.AppSettings { SharePort = 0 });
+
+        using var vm = CreateVm(engine);
+        var mainChoice = vm.SelectedStrategy;
+        Assert.Equal(mainChoice, vm.Share.Strategy);
+
+        vm.Share.IsEnabled = true;
+        await WaitFor(() => File.Exists(args));
+        var (low, high) = ZapretSmart.Core.Engine.EngineCommandBuilder.ShareLocalPorts;
+        Assert.Contains($"--wf-lport={low}-{high}", File.ReadAllLines(args));
+        Assert.True(vm.Share.IsEngineRunning);
+        Assert.False(vm.IsRunning);
+
+        var other = vm.Strategies.First(s => s != mainChoice && s.Strategy.Intercept.Tcp is not null);
+        File.Delete(args);
+        vm.Share.Strategy = other;
+        await WaitFor(() => File.Exists(args));
+        Assert.Equal(mainChoice, vm.SelectedStrategy);
+        Assert.False(vm.IsRunning);
+        // Второй экземпляр тоже поднимает раздачу (она включена в настройках); Dispose гасит его движок.
+        using (var again = CreateVm(engine))
+        {
+            Assert.Equal(other.Strategy.Id, again.Share.Strategy?.Strategy.Id);
+            Assert.Equal(mainChoice?.Strategy.Id, again.SelectedStrategy?.Strategy.Id);
+        }
+
+        vm.Share.IsEnabled = false;
+        await WaitFor(() => !vm.Share.IsEngineRunning && vm.Log.Any(l => l.Contains("Раздача: движок остановлен", StringComparison.Ordinal)));
     }
 
     private static async Task WaitFor(Func<bool> condition)
