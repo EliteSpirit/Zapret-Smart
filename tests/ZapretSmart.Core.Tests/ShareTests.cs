@@ -394,6 +394,59 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.All(uuids, u => Assert.True(Guid.TryParse(u, out _)));
     }
 
+    private static string WlanProfile(string auth, string? key, bool isProtected) => $"""
+        <?xml version="1.0"?>
+        <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+          <name>Дом 5G</name>
+          <SSIDConfig><SSID><hex>D094D0BED0BC2035 47</hex><name>Дом 5G</name></SSID></SSIDConfig>
+          <connectionType>ESS</connectionType>
+          <MSM><security>
+            <authEncryption><authentication>{auth}</authentication><encryption>AES</encryption><useOneX>false</useOneX></authEncryption>
+            {(key is null ? "" : $"<sharedKey><keyType>passPhrase</keyType><protected>{(isProtected ? "true" : "false")}</protected><keyMaterial>{key}</keyMaterial></sharedKey>")}
+          </security></MSM>
+        </WLANProfile>
+        """;
+
+    [Fact]
+    public void HomeWifiPasswordIsReadOnlyWhenWindowsGivesItInPlainText()
+    {
+        Assert.Equal(new WifiCredentials("Дом 5G", "k7P9x2mQ", false, true), WindowsWifi.ParseProfile(WlanProfile("WPA2PSK", "k7P9x2mQ", false)));
+        Assert.Equal(new WifiCredentials("Дом 5G", "pass word", false, true), WindowsWifi.ParseProfile(WlanProfile("WPA3SAE", "pass word", false)));
+        // Без прав администратора Windows отдаёт зашифрованный блок: телефону он бесполезен.
+        Assert.Null(WindowsWifi.ParseProfile(WlanProfile("WPA2PSK", "01000000D08C9DDF0115D1118C7A00C0", true)).Passphrase);
+        Assert.Equal(new WifiCredentials("Дом 5G", null, true, true), WindowsWifi.ParseProfile(WlanProfile("open", null, false)));
+        // Корпоративная сеть с логином: профиль iPhone без настроек EAP для неё не подойдёт.
+        Assert.False(WindowsWifi.ParseProfile(WlanProfile("WPA2", null, false)).IsPersonal);
+    }
+
+    [Fact]
+    public void ProfileWithoutPasswordOmitsItAndOpenNetworksSayNone()
+    {
+        var noPassword = ParsePlist(IphoneProfile.Build(new WifiNetwork("Дом", null, IPAddress.Parse("192.168.1.5")), 8880));
+        Assert.Null(PlistValue(noPassword, "Password"));
+        Assert.Equal("Any", PlistValue(noPassword, "EncryptionType"));
+        Assert.Equal("http://192.168.1.5:8880/proxy.pac", PlistValue(noPassword, "ProxyPACURL"));
+
+        var open = ParsePlist(IphoneProfile.Build(new WifiNetwork("Кафе", null, IPAddress.Parse("10.0.0.2"), IsOpen: true), 8880));
+        Assert.Equal("None", PlistValue(open, "EncryptionType"));
+    }
+
+    /// <summary>Первым показывается адрес в домашнем Wi-Fi: там телефон обычно и находится. Точка доступа ПК — последней.</summary>
+    [Fact]
+    public void HomeWifiAddressComesBeforeCableAndHotspot()
+    {
+        Assert.True(NetworkPolicy.Rank(isWindowsHotspot: false, isWireless: true) < NetworkPolicy.Rank(false, false));
+        Assert.True(NetworkPolicy.Rank(false, false) < NetworkPolicy.Rank(true, true));
+    }
+
+    [WindowsPowerShellFact]
+    public void ReadingCurrentWifiNeverThrows()
+    {
+        // На раннере CI нет Wi-Fi: ответ null, а не исключение.
+        var wifi = WindowsWifi.Current();
+        Assert.True(wifi is null || wifi.Ssid.Length > 0);
+    }
+
     [Fact]
     public async Task ProfileIsServedOnlyWhileTheHotspotIsKnown()
     {
