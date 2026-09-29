@@ -283,6 +283,63 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.NotNull(WindowsHotspot.Parse("").Error);
     }
 
+    private static System.Xml.Linq.XDocument ParsePlist(string xml) =>
+        System.Xml.Linq.XDocument.Load(System.Xml.XmlReader.Create(new StringReader(xml),
+            new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore }));
+
+    /// <summary>Значение ключа в первом словаре plist, где он встречается.</summary>
+    private static string? PlistValue(System.Xml.Linq.XDocument doc, string key) =>
+        doc.Descendants("key").FirstOrDefault(k => k.Value == key)?.ElementsAfterSelf().First() is { } v
+            ? (v.Name.LocalName is "true" or "false" ? v.Name.LocalName : v.Value)
+            : null;
+
+    [Fact]
+    public void IphoneProfileCarriesTheHotspotAndProxyAndEscapesText()
+    {
+        var wifi = new WifiNetwork("ПК <Дом> & \"Ко\"", "p<a>ss&'1", IPAddress.Parse("192.168.137.1"));
+        var xml = IphoneProfile.Build(wifi, 8880);
+        var doc = ParsePlist(xml);
+
+        Assert.Equal("com.apple.wifi.managed", PlistValue(doc, "PayloadType"));
+        Assert.Equal(wifi.Ssid, PlistValue(doc, "SSID_STR"));
+        Assert.Equal(wifi.Passphrase, PlistValue(doc, "Password"));
+        Assert.Equal("Manual", PlistValue(doc, "ProxyType"));
+        Assert.Equal("192.168.137.1", PlistValue(doc, "ProxyServer"));
+        Assert.Equal("8880", PlistValue(doc, "ProxyServerPort"));
+        Assert.Equal("true", PlistValue(doc, "AutoJoin"));
+
+        // Повторная установка должна заменить профиль, а не добавить второй: UUID и идентификатор постоянные.
+        var again = ParsePlist(IphoneProfile.Build(wifi with { Passphrase = "other" }, 9000));
+        var uuids = doc.Descendants("key").Where(k => k.Value == "PayloadUUID").Select(k => k.ElementsAfterSelf().First().Value).ToList();
+        Assert.Equal(2, uuids.Distinct().Count());
+        Assert.Equal(uuids, again.Descendants("key").Where(k => k.Value == "PayloadUUID").Select(k => k.ElementsAfterSelf().First().Value));
+        Assert.All(uuids, u => Assert.True(Guid.TryParse(u, out _)));
+    }
+
+    [Fact]
+    public async Task ProfileIsServedOnlyWhileTheHotspotIsKnown()
+    {
+        WifiNetwork? wifi = null;
+        var proxy = Proxy(new ShareProxyOptions { Port = 0, BindAddress = IPAddress.Loopback, Wifi = () => wifi });
+
+        using (var phone = await Connect(proxy.Port))
+        {
+            await Send(phone, "GET /i HTTP/1.1\r\nHost: x\r\n\r\n");
+            Assert.StartsWith("HTTP/1.1 404", await ReadUntil(phone, "", toEnd: true));
+        }
+
+        wifi = new WifiNetwork("Zapret-PC", "secret123", IPAddress.Parse("192.168.137.1"));
+        using (var phone = await Connect(proxy.Port))
+        {
+            await Send(phone, "GET /i HTTP/1.1\r\nHost: x\r\n\r\n");
+            var response = await ReadUntil(phone, "", toEnd: true);
+            Assert.StartsWith("HTTP/1.1 200", response);
+            Assert.Contains("Content-Type: application/x-apple-aspen-config", response);
+            Assert.Contains("<string>Zapret-PC</string>", response);
+            Assert.Contains($"<integer>{proxy.Port}</integer>", response);
+        }
+    }
+
     [Fact]
     public void ProbeDescribesIpv4PacketsAndSkipsTheRest()
     {

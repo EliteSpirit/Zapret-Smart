@@ -76,7 +76,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _settings.HostsEnabled);
         Updates = new UpdatesViewModel(this, http);
         Search = new SearchViewModel(this);
-        Share = new ShareViewModel(this, _settings.SharePort, paths.ManageFirewall, _settings.ShareEnabled);
+        Share = new ShareViewModel(this, _settings.SharePort, paths.ManageSystem, _settings.ShareEnabled);
 
         ReloadStrategies();
         UpdateStatus();

@@ -11,7 +11,7 @@ public sealed record AppPaths(
     string UserStrategiesDir,
     string SettingsFile,
     string? HostsFile = null,
-    bool ManageFirewall = false)
+    bool ManageSystem = false)
 {
     /// <summary>Папка данных пользователя: настройки, резервная копия hosts, журнал обновления.</summary>
     public string DataDir => Path.GetDirectoryName(SettingsFile)!;
@@ -36,8 +36,8 @@ public sealed record AppPaths(
                 SettingsFile: SettingsStore.DefaultPath,
                 // Системный hosts правим только на Windows; в тестах путь не задан, и до системного файла они не дотянутся.
                 HostsFile: OperatingSystem.IsWindows() ? Core.Hosts.HostsFile.DefaultPath : null,
-                // Правило брандмауэра для раздачи ставим только в настоящем приложении, тесты брандмауэр не трогают.
-                ManageFirewall: OperatingSystem.IsWindows());
+                // Брандмауэр и точку доступа Windows раздача трогает только в настоящем приложении, не в тестах.
+                ManageSystem: OperatingSystem.IsWindows());
         }
     }
 }

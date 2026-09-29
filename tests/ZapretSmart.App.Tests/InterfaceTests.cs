@@ -119,7 +119,7 @@ public sealed class InterfaceTests : IDisposable
 
     /// <summary>
     /// Переключатель раздачи поднимает прокси (порт 0 в настройках: тест не занимает 8880), выключение его гасит,
-    /// выбор запоминается. Брандмауэр в тестах не трогается: ManageFirewall у тестовых путей выключен.
+    /// выбор запоминается. Брандмауэр и точка доступа в тестах не трогаются: ManageSystem у тестовых путей выключен.
     /// </summary>
     [AvaloniaFact]
     public async Task ShareSwitchStartsAndStopsTheProxyAndIsRemembered()

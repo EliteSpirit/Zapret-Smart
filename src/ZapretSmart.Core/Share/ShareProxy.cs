@@ -19,6 +19,9 @@ public sealed class ShareProxyOptions
     public Func<IPAddress, bool> AllowClient { get; init; } = NetworkPolicy.IsLocalClient;
     public Func<IPAddress, bool> AllowDestination { get; init; } = NetworkPolicy.IsAllowedDestination;
     public Func<string, CancellationToken, Task<IPAddress[]>> Resolve { get; init; } = Dns.GetHostAddressesAsync;
+
+    /// <summary>Сеть точки доступа ПК для профиля iPhone; null — точка доступа выключена или неизвестна.</summary>
+    public Func<WifiNetwork?> Wifi { get; init; } = () => null;
 }
 
 /// <summary>
@@ -243,6 +246,11 @@ public sealed class ShareProxy : IAsyncDisposable
     private async Task ServeLocalAsync(Socket client, ProxyRequest request, CancellationToken ct)
     {
         var path = request.Target.Split('?', 2)[0];
+        if (path is "/i" or "/iphone.mobileconfig")
+        {
+            await ServeProfileAsync(client, ct);
+            return;
+        }
         if (path != "/proxy.pac")
         {
             await ReplyAsync(client, 404, "Not Found", ct,
@@ -255,6 +263,26 @@ public sealed class ShareProxy : IAsyncDisposable
         var bytes = Encoding.UTF8.GetBytes(body);
         var headers = "HTTP/1.1 200 OK\r\nContent-Type: application/x-ns-proxy-autoconfig\r\n"
             + $"Content-Length: {bytes.Length}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+        await client.SendAsync(Encoding.ASCII.GetBytes(headers), SocketFlags.None, ct);
+        await client.SendAsync(bytes, SocketFlags.None, ct);
+    }
+
+    /// <summary>
+    /// Профиль iPhone: сеть точки доступа ПК с паролем и прокси. После установки iPhone сам подключается к этой сети
+    /// уже с прокси. Пароль точки доступа отдаётся только клиентам из локальной сети (их пропускает AllowClient).
+    /// </summary>
+    private async Task ServeProfileAsync(Socket client, CancellationToken ct)
+    {
+        if (_options.Wifi() is not { } wifi)
+        {
+            await ReplyAsync(client, 404, "Not Found", ct,
+                "Zapret Smart: точка доступа ПК выключена. Включите раздачу в приложении и откройте этот адрес снова.");
+            return;
+        }
+        var bytes = Encoding.UTF8.GetBytes(IphoneProfile.Build(wifi, Port));
+        var headers = "HTTP/1.1 200 OK\r\nContent-Type: application/x-apple-aspen-config\r\n"
+            + "Content-Disposition: attachment; filename=\"ZapretSmart.mobileconfig\"\r\n"
+            + $"Content-Length: {bytes.Length}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
         await client.SendAsync(Encoding.ASCII.GetBytes(headers), SocketFlags.None, ct);
         await client.SendAsync(bytes, SocketFlags.None, ct);
     }

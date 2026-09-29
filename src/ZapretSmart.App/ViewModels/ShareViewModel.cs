@@ -15,15 +15,18 @@ namespace ZapretSmart.App.ViewModels;
 public sealed partial class ShareViewModel : ObservableObject, IDisposable
 {
     private readonly MainWindowViewModel _main;
-    private readonly bool _manageFirewall;
+    private readonly bool _manageSystem;
+
+    /// <summary>Точку доступа включило приложение: значит, и выключает её приложение (при выключении раздачи и на выходе).</summary>
+    private bool _startedHotspot;
     private readonly HashSet<IPAddress> _reportedStrangers = [];
     private ShareProxy? _proxy;
     private bool _loading;
 
-    public ShareViewModel(MainWindowViewModel main, int port, bool manageFirewall, bool enabled)
+    public ShareViewModel(MainWindowViewModel main, int port, bool manageSystem, bool enabled)
     {
         _main = main;
-        _manageFirewall = manageFirewall;
+        _manageSystem = manageSystem;
         Port = port;
         _loading = true;
         IsEnabled = enabled;
@@ -36,15 +39,23 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     /// <summary>Порт, на котором прокси слушает. До запуска — порт из настроек.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PacUrl))]
+    [NotifyPropertyChangedFor(nameof(ProfileUrl))]
     private int _port;
 
     /// <summary>Адрес ПК, который вводится на телефоне.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PacUrl))]
     [NotifyPropertyChangedFor(nameof(HasAddress))]
+    [NotifyPropertyChangedFor(nameof(ShowLanSetup))]
+    [NotifyPropertyChangedFor(nameof(ShowLanHint))]
     private string? _address;
 
     public bool HasAddress => IsEnabled && Address is not null;
+
+    /// <summary>Подробная инструкция для домашней сети: когда работает точка доступа ПК, главная инструкция — для неё.</summary>
+    public bool ShowLanSetup => HasAddress && !ShowPhoneSetup;
+
+    public bool ShowLanHint => HasAddress && ShowPhoneSetup;
 
     public string PacUrl => $"http://{Address}:{Port}/proxy.pac";
 
@@ -53,6 +64,9 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasAddress))]
+    [NotifyPropertyChangedFor(nameof(ShowPhoneSetup))]
+    [NotifyPropertyChangedFor(nameof(ShowLanSetup))]
+    [NotifyPropertyChangedFor(nameof(ShowLanHint))]
     private bool _isEnabled;
 
     [ObservableProperty] private string _status = "";
@@ -67,11 +81,24 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HotspotText))]
     [NotifyPropertyChangedFor(nameof(IsHotspotOn))]
+    [NotifyPropertyChangedFor(nameof(ShowPhoneSetup))]
+    [NotifyPropertyChangedFor(nameof(ShowLanSetup))]
+    [NotifyPropertyChangedFor(nameof(ShowLanHint))]
     [NotifyCanExecuteChangedFor(nameof(StartHotspotCommand))]
     [NotifyCanExecuteChangedFor(nameof(StopHotspotCommand))]
     private HotspotState? _hotspot;
 
     public bool IsHotspotOn => Hotspot?.IsOn == true;
+
+    /// <summary>Адрес ПК в сети точки доступа Windows.</summary>
+    public string HotspotAddress => (_hotspotAddress ?? NetworkPolicy.WindowsHotspotAddress).ToString();
+
+    private IPAddress? _hotspotAddress;
+
+    /// <summary>Короткий адрес профиля для Safari: его легко набрать руками.</summary>
+    public string ProfileUrl => $"{HotspotAddress}:{Port}/i";
+
+    public bool ShowPhoneSetup => IsEnabled && IsHotspotOn && Hotspot?.Ssid is not null;
 
     public static readonly TimeSpan ProbeDuration = TimeSpan.FromSeconds(20);
 
@@ -110,7 +137,8 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     {
         null => "Если телефон не в той же сети Wi-Fi, что ПК, включите точку доступа: ПК сам станет сетью Wi-Fi.",
         { Error: { } error } => "Точка доступа: " + error + ".",
-        { IsOn: true } h => $"Точка доступа включена. Сеть «{h.Ssid}», пароль {h.Passphrase}. Подключено устройств: {h.Clients}.",
+        // Пароль показывается отдельно моноширинным шрифтом: Inter рисует «x» между цифрами как «×».
+        { IsOn: true } h => $"Точка доступа включена, подключено устройств: {h.Clients}.",
         _ => "Точка доступа выключена.",
     };
 
@@ -124,7 +152,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     private async Task StartAsync()
     {
         if (_proxy is not null) return;
-        var proxy = new ShareProxy(new ShareProxyOptions { Port = Port });
+        var proxy = new ShareProxy(new ShareProxyOptions { Port = Port, Wifi = CurrentWifi });
         try
         {
             proxy.Start();
@@ -148,7 +176,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         Status = _main.IsRunning ? "Раздача работает." : "Прокси работает, но обход выключен: телефон получит интернет без обхода.";
         _main.AppendLog($"Раздача: прокси слушает порт {Port}");
 
-        if (_manageFirewall && Environment.ProcessPath is { } exe)
+        if (_manageSystem && Environment.ProcessPath is { } exe)
         {
             var error = await ShareFirewall.AllowAsync(exe, Port, CancellationToken.None);
             if (error is not null)
@@ -157,6 +185,33 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
                 _main.AppendLog("! Раздача: " + error);
             }
         }
+        // Раздача без точки доступа ПК тоже работает (телефон в той же сети Wi-Fi), но с ней настройка телефона
+        // одноразовая, а при выключенном приложении сети с прокси просто нет. Поэтому включаем её сразу.
+        if (_manageSystem && IsHotspotAvailable) await EnsureHotspotAsync();
+    }
+
+    /// <summary>Включает точку доступа, если она выключена, и запоминает, что включило её приложение.</summary>
+    private async Task EnsureHotspotAsync()
+    {
+        await RunHotspotAsync(HotspotAction.Status);
+        if (_proxy is null || Hotspot is { IsOn: true } || Hotspot?.Error is { } error && IsFatal(error)) return;
+        await RunHotspotAsync(HotspotAction.Start);
+        if (Hotspot is { IsOn: true })
+        {
+            _startedHotspot = true;
+            _main.AppendLog($"Раздача: включена точка доступа «{Hotspot.Ssid}»");
+        }
+    }
+
+    /// <summary>Ошибки, при которых пытаться включить точку доступа бессмысленно.</summary>
+    private static bool IsFatal(string error) => error.StartsWith("в этом компьютере нет Wi-Fi", StringComparison.Ordinal);
+
+    private WifiNetwork? CurrentWifi()
+    {
+        var h = Hotspot;
+        return h is { IsOn: true, Ssid: { Length: > 0 } ssid, Passphrase: { } pass }
+            ? new WifiNetwork(ssid, pass, _hotspotAddress ?? NetworkPolicy.WindowsHotspotAddress)
+            : null;
     }
 
     private async Task StopAsync(bool removeFirewallRule)
@@ -172,7 +227,13 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         OtherAddresses.Clear();
         LastClient = null;
         Status = "";
-        if (removeFirewallRule && _manageFirewall) await ShareFirewall.RemoveAsync(CancellationToken.None);
+        if (removeFirewallRule && _manageSystem) await ShareFirewall.RemoveAsync(CancellationToken.None);
+        if (_startedHotspot)
+        {
+            _startedHotspot = false;
+            await RunHotspotAsync(HotspotAction.Stop);
+            _main.AppendLog("Раздача: точка доступа выключена");
+        }
     }
 
     /// <summary>Статус обхода сменился: подсказка в карточке должна это отражать.</summary>
@@ -186,6 +247,9 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     private void RefreshAddresses()
     {
         var all = NetworkPolicy.FindLocalAddresses();
+        _hotspotAddress = all.FirstOrDefault(a => a.IsWindowsHotspot)?.Address;
+        OnPropertyChanged(nameof(HotspotAddress));
+        OnPropertyChanged(nameof(ProfileUrl));
         Address = all.Count > 0 ? all[0].Address.ToString() : null;
         OtherAddresses.Clear();
         foreach (var a in all.Skip(1)) OtherAddresses.Add($"{a.Address} ({a.InterfaceName})");
@@ -198,10 +262,18 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     private bool CanRefreshHotspot() => IsHotspotAvailable && !IsHotspotBusy;
 
     [RelayCommand(CanExecute = nameof(CanStartHotspot))]
-    private Task StartHotspot() => RunHotspotAsync(HotspotAction.Start);
+    private async Task StartHotspot()
+    {
+        await RunHotspotAsync(HotspotAction.Start);
+        if (Hotspot is { IsOn: true }) _startedHotspot = true;
+    }
 
     [RelayCommand(CanExecute = nameof(CanStopHotspot))]
-    private Task StopHotspot() => RunHotspotAsync(HotspotAction.Stop);
+    private async Task StopHotspot()
+    {
+        await RunHotspotAsync(HotspotAction.Stop);
+        _startedHotspot = false;
+    }
 
     [RelayCommand(CanExecute = nameof(CanRefreshHotspot))]
     private Task RefreshHotspot() => RunHotspotAsync(HotspotAction.Status);
@@ -233,5 +305,18 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         _proxy = null;
         // Правило брандмауэра остаётся: раздача включена и при следующем запуске поднимется снова.
         proxy?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
+        // Точку доступа, которую включило приложение, гасим: без приложения в ней нет прокси, и телефон
+        // с профилем остался бы в сети без интернета. Нет сети — телефон сам уйдёт в домашний Wi-Fi или сотовую сеть.
+        if (_startedHotspot)
+        {
+            try
+            {
+                WindowsHotspot.RunAsync(HotspotAction.Stop, Path.Combine(Path.GetTempPath(), "ZapretSmart"), CancellationToken.None)
+                    .Wait(TimeSpan.FromSeconds(15));
+            }
+            catch (AggregateException)
+            {
+            }
+        }
     }
 }
