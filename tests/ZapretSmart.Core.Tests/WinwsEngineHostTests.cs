@@ -152,7 +152,7 @@ public sealed class WinwsEngineHostTests : IDisposable
         using var host = HostWith($"printf '%s\\n' \"$@\" > '{args}'\necho 'capture is started'\nexec sleep 30");
         await using (await host.StartAsync(Probe, CancellationToken.None)) { }
         var lines = File.ReadAllLines(args);
-        Assert.Equal(["--wf-tcp=443", "--hostlist=" + Path.Combine(_dir, "lists", SearchOptions.TargetsListId + ".txt"), "--hostlist-domains=" + EngineCommandBuilder.GuardDomain, "--filter-tcp=443", "--dpi-desync=multisplit"], lines);
+        Assert.Equal(["--wf-tcp=443", "--wf-lport-exclude=45000-48999", "--hostlist=" + Path.Combine(_dir, "lists", SearchOptions.TargetsListId + ".txt"), "--hostlist-domains=" + EngineCommandBuilder.GuardDomain, "--filter-tcp=443", "--dpi-desync=multisplit"], lines);
     }
 
     [UnixFact]

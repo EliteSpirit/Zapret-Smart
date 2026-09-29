@@ -101,6 +101,79 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.Equal("BYE", await ReadUntil(phone, "", toEnd: true));
     }
 
+    /// <summary>Свободный диапазон из нескольких портов для теста (подряд свободных портов ищем пробой).</summary>
+    private static (int Low, int High) FreeRange(int size)
+    {
+        for (var low = 41000; low < 44000; low += size)
+        {
+            var sockets = new List<Socket>();
+            try
+            {
+                for (var p = low; p < low + size; p++)
+                {
+                    var s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    sockets.Add(s);
+                    s.Bind(new IPEndPoint(IPAddress.Any, p));
+                }
+                return (low, low + size - 1);
+            }
+            catch (SocketException)
+            {
+            }
+            finally
+            {
+                foreach (var s in sockets) s.Dispose();
+            }
+        }
+        throw new InvalidOperationException("нет свободного диапазона");
+    }
+
+    /// <summary>По исходящему порту движок раздачи отличает трафик прокси от трафика ПК.</summary>
+    [Fact]
+    public async Task OutgoingConnectionsLeaveFromTheShareRange()
+    {
+        var range = FreeRange(8);
+        var proxy = Proxy(new ShareProxyOptions
+        {
+            Port = 0, BindAddress = IPAddress.Loopback, AllowDestination = _ => true, OutboundPorts = range,
+        });
+        for (var i = 0; i < 3; i++)
+        {
+            var (sitePort, accepted) = Site();
+            using var phone = await Connect(proxy.Port);
+            await Send(phone, $"CONNECT 127.0.0.1:{sitePort} HTTP/1.1\r\n\r\n");
+            using var site = await accepted;
+            Assert.InRange(((IPEndPoint)site.RemoteEndPoint!).Port, range.Low, range.High);
+            Assert.StartsWith("HTTP/1.1 200", await ReadUntil(phone, "\r\n\r\n"));
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheRangeIsFullTheConnectionStillWorksAndIsReported()
+    {
+        var range = FreeRange(2);
+        using var a = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        using var b = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        // Слушающий сокет занимает порт на обеих ОС: .NET на Linux ставит SO_REUSEADDR, и просто привязанный не мешал бы.
+        a.Bind(new IPEndPoint(IPAddress.Any, range.Low));
+        b.Bind(new IPEndPoint(IPAddress.Any, range.High));
+        a.Listen();
+        b.Listen();
+        var exhausted = 0;
+        var proxy = Proxy(new ShareProxyOptions
+        {
+            Port = 0, BindAddress = IPAddress.Loopback, AllowDestination = _ => true, OutboundPorts = range,
+        });
+        proxy.OutboundPortsExhausted += () => Interlocked.Increment(ref exhausted);
+
+        var (sitePort, accepted) = Site();
+        using var phone = await Connect(proxy.Port);
+        await Send(phone, $"CONNECT 127.0.0.1:{sitePort} HTTP/1.1\r\n\r\n");
+        using var site = await accepted;
+        Assert.StartsWith("HTTP/1.1 200", await ReadUntil(phone, "\r\n\r\n"));
+        Assert.Equal(1, exhausted);
+    }
+
     [Fact]
     public async Task PlainHttpIsForwardedWithAPathAndWithoutProxyHeaders()
     {
@@ -205,6 +278,9 @@ public sealed class ShareTests : IAsyncDisposable
         var sw = Stopwatch.StartNew();
         Assert.Equal("", await ReadUntil(slow, "", toEnd: true));
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
+        // Сокет закрывается раньше, чем прокси уменьшает счётчик в finally: ждём, а не проверяем в ту же миллисекунду.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (proxy.ActiveConnections != 0 && DateTime.UtcNow < deadline) await Task.Delay(10);
         Assert.Equal(0, proxy.ActiveConnections);
     }
 

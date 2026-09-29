@@ -5,7 +5,7 @@ using ZapretSmart.Core.Strategies;
 namespace ZapretSmart.Core.Search;
 
 /// <summary>Dispose синхронно убивает все запущенные хостом движки: при выходе из приложения асинхронная отмена не успевает.</summary>
-public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, TimeSpan readyTimeout) : IEngineHost, IDisposable
+public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, TimeSpan readyTimeout, EngineScope scope = EngineScope.Pc) : IEngineHost, IDisposable
 {
     public const string ReadyMarker = "capture is started";
 
@@ -13,7 +13,7 @@ public sealed class WinwsEngineHost(string executablePath, EngineLayout layout, 
 
     public async Task<IAsyncDisposable> StartAsync(Strategy strategy, CancellationToken ct)
     {
-        var argv = EngineCommandBuilder.Build(strategy, layout).Argv;
+        var argv = EngineCommandBuilder.Build(strategy, layout, scope).Argv;
         var runner = new EngineRunner(executablePath);
         var output = new ConcurrentQueue<string>();
         var errors = new ConcurrentQueue<string>();

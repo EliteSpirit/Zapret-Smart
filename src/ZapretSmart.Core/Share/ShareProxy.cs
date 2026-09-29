@@ -20,6 +20,12 @@ public sealed class ShareProxyOptions
     public Func<IPAddress, bool> AllowDestination { get; init; } = NetworkPolicy.IsAllowedDestination;
     public Func<string, CancellationToken, Task<IPAddress[]>> Resolve { get; init; } = Dns.GetHostAddressesAsync;
 
+    /// <summary>
+    /// Локальные порты исходящих соединений. По ним движок раздачи отличает трафик прокси от трафика ПК
+    /// (см. EngineScope.Share). null — порт выбирает система, так прокси работает в тестах и вне Windows.
+    /// </summary>
+    public (int Low, int High)? OutboundPorts { get; init; }
+
     /// <summary>Сеть точки доступа ПК для профиля iPhone; null — точка доступа выключена или неизвестна.</summary>
     public Func<WifiNetwork?> Wifi { get; init; } = () => null;
 }
@@ -40,6 +46,7 @@ public sealed class ShareProxy : IAsyncDisposable
     private TcpListener? _listener;
     private Task? _acceptLoop;
     private int _active;
+    private int _nextPort;
 
     public ShareProxy(ShareProxyOptions? options = null)
     {
@@ -57,6 +64,12 @@ public sealed class ShareProxy : IAsyncDisposable
 
     /// <summary>Отказ клиенту не из локальной сети. Вызывается из фонового потока.</summary>
     public event Action<IPAddress>? ClientRejected;
+
+    /// <summary>
+    /// Свободного порта в диапазоне не нашлось, соединение открыто с порта, который выбрала система.
+    /// Такое соединение движок раздачи не видит. Вызывается из фонового потока.
+    /// </summary>
+    public event Action? OutboundPortsExhausted;
 
     public void Start()
     {
@@ -297,25 +310,64 @@ public sealed class ShareProxy : IAsyncDisposable
         + $"  return \"PROXY {address}:{port}; DIRECT\";\n"
         + "}\n";
 
+    /// <summary>Сколько портов диапазона пробовать для одного соединения, прежде чем отдать выбор системе.</summary>
+    private const int PortAttempts = 64;
+
     private async Task<Socket?> ConnectAsync(IPAddress[] addresses, int port, CancellationToken ct)
     {
+        var range = _options.OutboundPorts;
         foreach (var address in addresses)
         {
-            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            connectCts.CancelAfter(_options.ConnectTimeout);
-            try
+            // С диапазоном: до PortAttempts портов из него, затем одна попытка с портом от системы.
+            for (var attempt = 0; ; attempt++)
             {
-                await socket.ConnectAsync(address, port, connectCts.Token);
-                return socket;
-            }
-            catch (Exception e) when (e is SocketException or OperationCanceledException)
-            {
-                socket.Dispose();
-                if (ct.IsCancellationRequested) throw;
+                var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                var fromRange = range is not null && attempt < PortAttempts;
+                if (fromRange && !TryBind(socket, range!.Value))
+                {
+                    socket.Dispose();
+                    continue;
+                }
+                if (range is not null && !fromRange) OutboundPortsExhausted?.Invoke();
+
+                using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                connectCts.CancelAfter(_options.ConnectTimeout);
+                try
+                {
+                    await socket.ConnectAsync(address, port, connectCts.Token);
+                    return socket;
+                }
+                catch (SocketException e) when (fromRange && e.SocketErrorCode == SocketError.AddressAlreadyInUse)
+                {
+                    // Порт ещё держит прежнее соединение с тем же сайтом (TIME_WAIT): берём следующий.
+                    socket.Dispose();
+                }
+                catch (Exception e) when (e is SocketException or OperationCanceledException)
+                {
+                    socket.Dispose();
+                    if (ct.IsCancellationRequested) throw;
+                    break; // этот адрес не отвечает, пробуем следующий
+                }
             }
         }
         return null;
+    }
+
+    /// <summary>Привязывает сокет к следующему порту диапазона по кругу. false — порт занят.</summary>
+    private bool TryBind(Socket socket, (int Low, int High) range)
+    {
+        var size = range.High - range.Low + 1;
+        var offset = (int)((uint)Interlocked.Increment(ref _nextPort) % (uint)size);
+        var any = socket.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any;
+        try
+        {
+            socket.Bind(new IPEndPoint(any, range.Low + offset));
+            return true;
+        }
+        catch (SocketException e) when (e.SocketErrorCode is SocketError.AddressAlreadyInUse or SocketError.AccessDenied)
+        {
+            return false;
+        }
     }
 
     /// <summary>

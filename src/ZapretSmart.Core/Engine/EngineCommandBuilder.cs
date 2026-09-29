@@ -22,6 +22,16 @@ public sealed class StrategyRejectedException(IReadOnlyList<string> errors)
 
 public sealed record EngineCommand(IReadOnlyList<string> Argv, IReadOnlyList<string> Warnings);
 
+/// <summary>Чей трафик обрабатывает экземпляр движка.</summary>
+public enum EngineScope
+{
+    /// <summary>Трафик самого ПК: основной обход, поиск, сторож. Соединения прокси раздачи сюда не попадают.</summary>
+    Pc,
+
+    /// <summary>Только соединения прокси раздачи: их исходящие порты лежат в <see cref="EngineCommandBuilder.ShareLocalPorts"/>.</summary>
+    Share,
+}
+
 public static class EngineCommandBuilder
 {
     /// <summary>
@@ -33,10 +43,18 @@ public static class EngineCommandBuilder
     public const string GuardIp = "192.0.2.0/32";
 
     /// <summary>
+    /// Локальные порты, с которых прокси раздачи открывает соединения. По ним два экземпляра движка делят трафик:
+    /// раздача берёт только этот диапазон, всё остальное его пропускает, и пакет не обрабатывается дважды.
+    /// Диапазон лежит ниже динамических портов Windows (49152–65535), другие программы исходящие соединения
+    /// с этих портов не открывают.
+    /// </summary>
+    public static readonly (int Low, int High) ShareLocalPorts = (45000, 48999);
+
+    /// <summary>
     /// Собирает argv для движка. Стратегия проверяется заново: вызывающий код не обязан ей доверять.
     /// Результат передаётся в ProcessStartInfo.ArgumentList, без склейки в строку и без оболочки.
     /// </summary>
-    public static EngineCommand Build(Strategy strategy, EngineLayout layout)
+    public static EngineCommand Build(Strategy strategy, EngineLayout layout, EngineScope scope = EngineScope.Pc)
     {
         var errors = StrategyValidator.Validate(strategy).ToList();
         if (errors.Count > 0)
@@ -46,6 +64,10 @@ public static class EngineCommandBuilder
         var argv = new List<string>();
         if (strategy.Intercept.Tcp is not null) argv.Add("--wf-tcp=" + strategy.Intercept.Tcp);
         if (strategy.Intercept.Udp is not null) argv.Add("--wf-udp=" + strategy.Intercept.Udp);
+        var (low, high) = ShareLocalPorts;
+        argv.Add(scope == EngineScope.Share ? $"--wf-lport={low}-{high}" : $"--wf-lport-exclude={low}-{high}");
+        if (scope == EngineScope.Share && strategy.Intercept.Tcp is null)
+            warnings.Add("Стратегия не перехватывает TCP, а прокси раздачи передаёт только TCP: для телефона она ничего не сделает");
 
         for (var i = 0; i < strategy.Profiles.Count; i++)
         {

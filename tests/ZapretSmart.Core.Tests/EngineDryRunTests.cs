@@ -96,6 +96,59 @@ public class EngineDryRunTests
         AssertEngineAccepts(cmd.Argv);
     }
 
+    /// <summary>
+    /// Фильтр WinDivert, который строит движок: раздача берёт только исходящие с портов прокси и ответы на них,
+    /// обход ПК их исключает. Проверяется текст фильтра из --wf-save, до WinDivert дело не доходит.
+    /// </summary>
+    [EngineTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EngineFilterSplitsTrafficByProxyPorts(bool share)
+    {
+        if (!Path.GetFileNameWithoutExtension(Engine!).Equals("winws", StringComparison.OrdinalIgnoreCase)) return;
+        var s = StrategyLoader.LoadFile(Path.Combine(AppContext.BaseDirectory, "presets", Directory.EnumerateFiles(
+            Path.Combine(AppContext.BaseDirectory, "presets"), "*.json").Select(Path.GetFileName).Order().First()!)).Strategy!;
+        var file = Path.Combine(Path.GetTempPath(), "zs-wf-" + Guid.NewGuid().ToString("N") + ".txt");
+        var argv = EngineCommandBuilder.Build(s, Layout, share ? EngineScope.Share : EngineScope.Pc).Argv.Append("--wf-save=" + file).ToList();
+        var (code, output) = RunEngine(argv);
+        Assert.True(code == 0 && File.Exists(file), output);
+        var filter = File.ReadAllText(file);
+        var (low, high) = EngineCommandBuilder.ShareLocalPorts;
+        var part = share
+            ? $"(tcp and ((outbound and tcp.SrcPort >= {low} and tcp.SrcPort <= {high}) or (inbound and tcp.DstPort >= {low} and tcp.DstPort <= {high})))"
+            : $"(!tcp or (outbound and (tcp.SrcPort < {low} or tcp.SrcPort > {high})) or (inbound and (tcp.DstPort < {low} or tcp.DstPort > {high})))";
+        Assert.Contains("\nand\n" + part, filter.ReplaceLineEndings("\n"));
+
+        // --dry-run фильтр не компилирует: без этой проверки ошибка всплыла бы только при настоящем запуске
+        // (так и было: WinDivert отвечал «The parameter is incorrect», и обход на ПК не включался).
+        var dll = Path.Combine(Path.GetDirectoryName(Engine!)!, "WinDivert.dll");
+        if (File.Exists(dll)) Assert.Null(WinDivertFilter.Check(dll, filter));
+    }
+
+    [EngineTheory]
+    [InlineData("--wf-lport=5-1")]
+    [InlineData("--wf-lport=0-10")]
+    [InlineData("--wf-lport=1-70000")]
+    [InlineData("--wf-lport=10")]
+    [InlineData("--wf-lport=10-20x")]
+    public void EngineRejectsBadProxyPortRange(string arg)
+    {
+        if (!Path.GetFileNameWithoutExtension(Engine!).Equals("winws", StringComparison.OrdinalIgnoreCase)) return;
+        var (code, output) = RunEngine(["--dry-run", "--wf-tcp=443", arg]);
+        Assert.True(code != 0, output);
+    }
+
+    private static (int Code, string Output) RunEngine(IEnumerable<string> argv)
+    {
+        var psi = new ProcessStartInfo(Engine!) { RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in argv) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEndAsync();
+        var stderr = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        return (p.ExitCode, stdout.Result + stderr);
+    }
+
     private static void AssertEngineAccepts(IReadOnlyList<string> argv)
     {
         var psi = new ProcessStartInfo(Engine!)
