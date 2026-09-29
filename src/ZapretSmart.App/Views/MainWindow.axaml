@@ -8,9 +8,10 @@
         x:DataType="vm:MainWindowViewModel"
         Title="Zapret Smart"
         Icon="/Assets/app.png"
-        Width="1100" Height="720" MinWidth="820" MinHeight="560"
+        Width="960" Height="640" MinWidth="820" MinHeight="540"
         Background="{DynamicResource ZsBackground}"
         FontFamily="{DynamicResource ZsFont}"
+        FontSize="13"
         Classes.top-menu="{Binding MenuOnTop}">
 
   <!-- Frame снимается целиком при смене темы: снимок гаснет поверх новой темы (OverlayHost). -->
@@ -21,8 +22,8 @@
     <Grid>
       <Border Classes="chrome" />
       <StackPanel Classes="logo" IsHitTestVisible="False">
-        <TextBlock Text="Zapret" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource ZsText}" VerticalAlignment="Center" />
-        <TextBlock Text="SMART" FontSize="11" FontWeight="SemiBold" LetterSpacing="3" Foreground="{DynamicResource ZsAccent}" VerticalAlignment="Center" />
+        <TextBlock Text="Zapret" FontSize="17" FontWeight="Bold" Foreground="{DynamicResource ZsText}" VerticalAlignment="Center" />
+        <TextBlock Text="SMART" FontSize="10" FontWeight="SemiBold" LetterSpacing="3" Foreground="{DynamicResource ZsAccent}" VerticalAlignment="Center" />
       </StackPanel>
 
       <TabControl Classes="nav" x:Name="Tabs">
@@ -36,22 +37,22 @@
               <TextBlock Text="Обход" VerticalAlignment="Center" />
             </StackPanel>
           </TabItem.Header>
-          <ScrollViewer Padding="28">
-            <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Stretch">
+          <ScrollViewer Padding="22,18">
+            <StackPanel Spacing="12" MaxWidth="760" HorizontalAlignment="Stretch">
               <StackPanel Spacing="6">
-                <StackPanel Orientation="Horizontal" Spacing="14">
+                <StackPanel Orientation="Horizontal" Spacing="10">
                   <Panel Width="14" Height="14" VerticalAlignment="Center">
                     <Ellipse Classes="pulse" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsSwitching}" />
                     <Ellipse Classes="dot" Classes.on="{Binding IsRunning}" Classes.busy="{Binding IsSwitching}" />
                   </Panel>
                   <TextBlock Classes="h1" Text="{Binding StatusText}" />
                 </StackPanel>
-                <TextBlock Classes="muted reveal" Text="{Binding WatchdogStatus}" Margin="28,0,0,0"
+                <TextBlock Classes="muted reveal" Text="{Binding WatchdogStatus}" Margin="24,0,0,0"
                            IsVisible="{Binding WatchdogStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
               </StackPanel>
 
               <Border Classes="card">
-                <StackPanel Spacing="14">
+                <StackPanel Spacing="10">
                   <TextBlock Text="Стратегия" Classes="caption" />
                   <ComboBox ItemsSource="{Binding Strategies}" SelectedItem="{Binding SelectedStrategy}"
                             IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Stretch">
@@ -90,6 +91,10 @@
                   <Panel Height="260">
                     <ScrollViewer x:Name="LogScroll" HorizontalScrollBarVisibility="Disabled">
                       <ItemsControl x:Name="LogItems" ItemsSource="{Binding Log}">
+                        <!-- Журнал до 500 строк: без виртуализации каждая смена вкладки заново раскладывала их все. -->
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                           <DataTemplate x:DataType="sys:String">
                             <TextBlock Classes="log" Text="{Binding}"
@@ -118,8 +123,8 @@
               <TextBlock Text="Стратегии" VerticalAlignment="Center" />
             </StackPanel>
           </TabItem.Header>
-          <Grid ColumnDefinitions="260,*" Margin="28,28,28,0" DataContext="{Binding Editor}" x:DataType="vm:StrategyEditorViewModel">
-            <DockPanel Grid.Column="0" Margin="0,0,20,20">
+          <Grid ColumnDefinitions="230,*" Margin="22,18,22,0" DataContext="{Binding Editor}" x:DataType="vm:StrategyEditorViewModel">
+            <DockPanel Grid.Column="0" Margin="0,0,14,14">
               <TextBlock DockPanel.Dock="Top" Classes="h1" Text="Стратегии" Margin="0,0,0,14" />
               <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,12,0,0">
                 <Button Classes="small" Content="Новая" Command="{Binding NewCommand}" />
@@ -162,7 +167,7 @@
 
             <DockPanel Grid.Column="1">
               <!-- Строка сохранения: только у своих стратегий. -->
-              <Border DockPanel.Dock="Bottom" Classes="card" Margin="0,12,0,20" Padding="16,12" IsVisible="{Binding !IsReadOnly}">
+              <Border DockPanel.Dock="Bottom" Classes="card" Margin="0,10,0,14" Padding="14,10" IsVisible="{Binding !IsReadOnly}">
                 <DockPanel>
                   <Button DockPanel.Dock="Right" Classes="primary small" Content="Сохранить" Command="{Binding SaveCommand}"
                           VerticalAlignment="Top" Margin="12,0,0,0" />
@@ -184,10 +189,10 @@
               </Border>
 
               <ScrollViewer x:Name="EditorScroll">
-                <StackPanel Spacing="14" Margin="0,0,0,28">
+                <StackPanel Spacing="10" Margin="0,0,0,18">
 
                   <!-- Просмотр встроенной стратегии: читается как описание, а не как форма с серыми полями. -->
-                  <StackPanel Spacing="14" IsVisible="{Binding IsReadOnly}" Classes="reveal">
+                  <StackPanel Spacing="10" IsVisible="{Binding IsReadOnly}" Classes="reveal">
                     <Border Classes="card" Padding="16,12">
                       <DockPanel>
                         <Button DockPanel.Dock="Right" Classes="primary small" Content="Сделать копию" Command="{Binding CopyCommand}"
@@ -244,7 +249,7 @@
                   </StackPanel>
 
                   <!-- Конструктор своей стратегии. -->
-                  <StackPanel Spacing="14" IsVisible="{Binding !IsReadOnly}" Classes="reveal">
+                  <StackPanel Spacing="10" IsVisible="{Binding !IsReadOnly}" Classes="reveal">
                     <Border Classes="card">
                       <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
                         <TextBlock Grid.ColumnSpan="3" Text="Название" Classes="caption" />
@@ -334,8 +339,8 @@
               <TextBlock Text="Поиск" VerticalAlignment="Center" />
             </StackPanel>
           </TabItem.Header>
-          <ScrollViewer Padding="28" DataContext="{Binding Search}" x:DataType="vm:SearchViewModel">
-            <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Stretch">
+          <ScrollViewer Padding="22,18" DataContext="{Binding Search}" x:DataType="vm:SearchViewModel">
+            <StackPanel Spacing="12" MaxWidth="760" HorizontalAlignment="Stretch">
               <TextBlock Classes="h1" Text="Поиск стратегии" />
 
               <Border Classes="card" IsVisible="{Binding !IsWindows}">
@@ -346,7 +351,7 @@
                 <Grid ColumnDefinitions="*,20,200">
                   <StackPanel Spacing="6">
                     <TextBlock Classes="caption" Text="Сайты для проверки, по одному на строку" />
-                    <TextBox Text="{Binding TargetsText}" AcceptsReturn="True" Height="104" IsEnabled="{Binding !IsSearching}" />
+                    <TextBox Text="{Binding TargetsText}" AcceptsReturn="True" Height="84" IsEnabled="{Binding !IsSearching}" />
                   </StackPanel>
                   <StackPanel Grid.Column="2" Spacing="6">
                     <TextBlock Classes="caption" Text="Лимит времени" />
@@ -370,7 +375,7 @@
 
               <!-- Шаги: пока поиск не шёл, объясняют план; во время поиска показывают, где он сейчас. -->
               <Border Classes="card">
-                <StackPanel Spacing="14">
+                <StackPanel Spacing="10">
                   <ItemsControl ItemsSource="{Binding Steps}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate><UniformGrid Columns="4" /></ItemsPanelTemplate>
@@ -444,40 +449,39 @@
               <TextBlock Text="Настройки" VerticalAlignment="Center" />
             </StackPanel>
           </TabItem.Header>
-          <ScrollViewer Padding="28">
-            <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Stretch">
+          <ScrollViewer Padding="22,18">
+            <StackPanel Spacing="10" MaxWidth="760" HorizontalAlignment="Stretch">
               <TextBlock Classes="h1" Text="Настройки" />
 
               <Border Classes="card">
-                <StackPanel Spacing="14">
+                <StackPanel Spacing="10">
                   <TextBlock Classes="title" Text="Оформление" />
-                  <ItemsControl ItemsSource="{Binding Themes}" Margin="0,0,-12,-12">
+                  <ItemsControl ItemsSource="{Binding Themes}" Margin="0,0,-8,-8">
                     <ItemsControl.ItemsPanel>
-                      <ItemsPanelTemplate><UniformGrid Columns="3" /></ItemsPanelTemplate>
+                      <ItemsPanelTemplate><UniformGrid Columns="6" /></ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:ThemeOption">
-                        <Button Classes="tile" Command="{Binding SelectCommand}" Margin="0,0,12,12"
-                                AutomationProperties.Name="{Binding Name}">
-                          <Border Classes="tileFrame" Classes.selected="{Binding IsSelected}" Padding="4">
+                        <Button Classes="tile" Command="{Binding SelectCommand}" Margin="0,0,8,8"
+                                AutomationProperties.Name="{Binding Name}" ToolTip.Tip="{Binding Tagline}">
+                          <Border Classes="tileFrame" Classes.selected="{Binding IsSelected}" Padding="3">
                             <StackPanel>
-                              <Border Height="86" CornerRadius="6" ClipToBounds="True" Background="{Binding BackgroundBrush}">
+                              <Border Height="50" CornerRadius="5" ClipToBounds="True" Background="{Binding BackgroundBrush}">
                                 <Panel>
                                   <c:BackdropView Kind="{Binding Theme.Backdrop}" EffectColor="{Binding Theme.Effect}" Animated="False" />
-                                  <Border Width="30" HorizontalAlignment="Left" Background="{Binding SurfaceBrush}" Opacity="0.85" />
-                                  <StackPanel Margin="42,16,12,0" Spacing="6">
-                                    <Border Height="6" Width="72" CornerRadius="3" Background="{Binding TextBrush}" HorizontalAlignment="Left" />
-                                    <Border Height="4" Width="104" CornerRadius="2" Background="{Binding MutedBrush}" HorizontalAlignment="Left" />
-                                    <Border Height="12" Width="42" CornerRadius="4" Background="{Binding AccentBrush}" HorizontalAlignment="Left" Margin="0,6,0,0" />
+                                  <Border Width="16" HorizontalAlignment="Left" Background="{Binding SurfaceBrush}" Opacity="0.85" />
+                                  <StackPanel Margin="24,10,8,0" Spacing="4">
+                                    <Border Height="4" Width="40" CornerRadius="2" Background="{Binding TextBrush}" HorizontalAlignment="Left" />
+                                    <Border Height="3" Width="56" CornerRadius="1.5" Background="{Binding MutedBrush}" HorizontalAlignment="Left" />
+                                    <Border Height="8" Width="24" CornerRadius="3" Background="{Binding AccentBrush}" HorizontalAlignment="Left" Margin="0,3,0,0" />
                                   </StackPanel>
                                 </Panel>
                               </Border>
-                              <DockPanel Margin="8,9,6,2">
+                              <DockPanel Margin="5,5,3,3">
                                 <Path DockPanel.Dock="Right" Data="M4,9 L7.2,12.2 L13,5.8" Stroke="{DynamicResource ZsAccent}" StrokeThickness="2"
-                                      StrokeLineCap="Round" StrokeJoin="Round" Width="18" Height="18" IsVisible="{Binding IsSelected}" />
+                                      StrokeLineCap="Round" StrokeJoin="Round" Width="14" Height="14" IsVisible="{Binding IsSelected}" />
                                 <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource ZsText}" />
                               </DockPanel>
-                              <TextBlock Text="{Binding Tagline}" Classes="caption" Margin="8,0,8,8" Height="32" />
                             </StackPanel>
                           </Border>
                         </Button>
@@ -488,7 +492,7 @@
                     <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding AnimatedBackdrop}"
                                   AutomationProperties.Name="Движение фона" Margin="16,0,0,0" />
                     <StackPanel Spacing="4">
-                      <TextBlock Classes="title" Text="Движение фона" FontSize="14" />
+                      <TextBlock Classes="title" Text="Движение фона" />
                       <TextBlock Classes="muted" Text="Выключите, если отвлекает или ноутбук греется: фон станет неподвижной картинкой. Когда в Windows выключены эффекты анимации, фон неподвижен всегда." />
                     </StackPanel>
                   </DockPanel>
@@ -496,7 +500,7 @@
                     <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding MenuOnTop}"
                                   AutomationProperties.Name="Меню сверху" Margin="16,0,0,0" />
                     <StackPanel Spacing="4">
-                      <TextBlock Classes="title" Text="Меню сверху" FontSize="14" />
+                      <TextBlock Classes="title" Text="Меню сверху" />
                       <TextBlock Classes="muted" Text="Вкладки строкой над содержимым вместо колонки слева. Содержимому достаётся вся ширина окна." />
                     </StackPanel>
                   </DockPanel>
