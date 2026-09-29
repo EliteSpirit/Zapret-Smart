@@ -30,6 +30,12 @@ public sealed record AppSettings
 
     /// <summary>Свой блок в системном файле hosts. По умолчанию выключен: это изменение системного файла.</summary>
     public bool HostsEnabled { get; init; }
+
+    /// <summary>Прокси для телефона в локальной сети: его соединения открывает ПК, и обход их обрабатывает. По умолчанию выключен.</summary>
+    public bool ShareEnabled { get; init; }
+
+    /// <summary>Порт прокси для телефона.</summary>
+    public int SharePort { get; init; } = Share.ShareProxy.DefaultPort;
 }
 
 public sealed class SettingsStore(string path)

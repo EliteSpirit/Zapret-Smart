@@ -76,6 +76,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _settings.HostsEnabled);
         Updates = new UpdatesViewModel(this, http);
         Search = new SearchViewModel(this);
+        Share = new ShareViewModel(this, _settings.SharePort, paths.ManageSystem, _settings.ShareEnabled);
 
         ReloadStrategies();
         UpdateStatus();
@@ -105,6 +106,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public HostsViewModel Hosts { get; }
     public UpdatesViewModel Updates { get; }
     public SearchViewModel Search { get; }
+    public ShareViewModel Share { get; }
 
     public ObservableCollection<StrategyItem> Strategies { get; } = [];
     public ObservableCollection<string> LoadErrors { get; } = [];
@@ -312,6 +314,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void SaveHostsEnabled(bool value) => SaveSettings(_settings with { HostsEnabled = value });
 
+    public void SaveShareEnabled(bool value) => SaveSettings(_settings with { ShareEnabled = value });
+
     /// <summary>Установка другой версии: приложение должно закрыться, чтобы скрипт заменил файлы.</summary>
     public event Action? ExitForUpdateRequested;
 
@@ -333,6 +337,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void UpdateStatus()
     {
+        // Статус может смениться ещё в конструкторе, до создания Share.
+        Share?.OnBypassChanged();
         StatusText = !IsWindows ? "Движок работает только под Windows"
             : IsSwitching ? "Сторож подбирает стратегию"
             : IsSearching ? "Идёт поиск стратегии"
@@ -452,6 +458,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _disposed = true;
         StopWatchdog();
         Search.Dispose();
+        Share.Dispose();
         _runner.Dispose();
     }
 }
