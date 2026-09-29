@@ -3586,17 +3586,23 @@ int main(int argc, char **argv)
 		}
 		if (wf_lport_hi)
 		{
-			char lport[256];
-			snprintf(lport, sizeof(lport),
-				"(tcp and (outbound and tcp.SrcPort >= %u and tcp.SrcPort <= %u or inbound and tcp.DstPort >= %u and tcp.DstPort <= %u))",
-				wf_lport_lo, wf_lport_hi, wf_lport_lo, wf_lport_hi);
+			// Fully parenthesized, no negated group: the exclude form is written out by De Morgan.
+			char lport[320];
+			if (wf_lport_exclude)
+				snprintf(lport, sizeof(lport),
+					"(!tcp or (outbound and (tcp.SrcPort < %u or tcp.SrcPort > %u)) or (inbound and (tcp.DstPort < %u or tcp.DstPort > %u)))",
+					wf_lport_lo, wf_lport_hi, wf_lport_lo, wf_lport_hi);
+			else
+				snprintf(lport, sizeof(lport),
+					"(tcp and ((outbound and tcp.SrcPort >= %u and tcp.SrcPort <= %u) or (inbound and tcp.DstPort >= %u and tcp.DstPort <= %u)))",
+					wf_lport_lo, wf_lport_hi, wf_lport_lo, wf_lport_hi);
 			if (strlen(windivert_filter) + strlen(lport) + 16 >= sizeof(windivert_filter))
 			{
 				DLOG_ERR("windivert filter : too long\n");
 				exit_clean(1);
 			}
 			snprintf(windivert_filter + strlen(windivert_filter), sizeof(windivert_filter) - strlen(windivert_filter),
-				"\nand\n%s%s\n", wf_lport_exclude ? "!" : "", lport);
+				"\nand\n%s\n", lport);
 		}
 	}
 	DLOG("windivert filter size: %zu\nwindivert filter:\n%s\n", strlen(windivert_filter), windivert_filter);

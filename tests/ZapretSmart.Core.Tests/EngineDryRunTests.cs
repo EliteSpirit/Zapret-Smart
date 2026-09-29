@@ -112,10 +112,17 @@ public class EngineDryRunTests
         var argv = EngineCommandBuilder.Build(s, Layout, share ? EngineScope.Share : EngineScope.Pc).Argv.Append("--wf-save=" + file).ToList();
         var (code, output) = RunEngine(argv);
         Assert.True(code == 0 && File.Exists(file), output);
-        var filter = File.ReadAllText(file).ReplaceLineEndings("\n");
+        var filter = File.ReadAllText(file);
         var (low, high) = EngineCommandBuilder.ShareLocalPorts;
-        var part = $"(tcp and (outbound and tcp.SrcPort >= {low} and tcp.SrcPort <= {high} or inbound and tcp.DstPort >= {low} and tcp.DstPort <= {high}))";
-        Assert.Contains("\nand\n" + (share ? "" : "!") + part, filter);
+        var part = share
+            ? $"(tcp and ((outbound and tcp.SrcPort >= {low} and tcp.SrcPort <= {high}) or (inbound and tcp.DstPort >= {low} and tcp.DstPort <= {high})))"
+            : $"(!tcp or (outbound and (tcp.SrcPort < {low} or tcp.SrcPort > {high})) or (inbound and (tcp.DstPort < {low} or tcp.DstPort > {high})))";
+        Assert.Contains("\nand\n" + part, filter.ReplaceLineEndings("\n"));
+
+        // --dry-run фильтр не компилирует: без этой проверки ошибка всплыла бы только при настоящем запуске
+        // (так и было: WinDivert отвечал «The parameter is incorrect», и обход на ПК не включался).
+        var dll = Path.Combine(Path.GetDirectoryName(Engine!)!, "WinDivert.dll");
+        if (File.Exists(dll)) Assert.Null(WinDivertFilter.Check(dll, filter));
     }
 
     [EngineTheory]
