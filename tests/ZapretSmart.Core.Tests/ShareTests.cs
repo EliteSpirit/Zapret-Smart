@@ -393,6 +393,76 @@ public sealed class ShareTests : IAsyncDisposable
         }
     }
 
+    private static byte[] Ipv4Tcp(string source)
+    {
+        var p = new byte[40];
+        p[0] = 0x45;
+        p[9] = 6;
+        IPAddress.Parse(source).GetAddressBytes().CopyTo(p, 12);
+        IPAddress.Parse("192.168.31.40").GetAddressBytes().CopyTo(p, 16);
+        return p;
+    }
+
+    [Fact]
+    public void SynSourceIsTheSenderOfAnIpv4TcpPacket()
+    {
+        Assert.Equal(IPAddress.Parse("192.168.31.77"), ShareReachProbe.SynSource(Ipv4Tcp("192.168.31.77")));
+        var udp = Ipv4Tcp("192.168.31.77");
+        udp[9] = 17;
+        Assert.Null(ShareReachProbe.SynSource(udp));
+        Assert.Null(ShareReachProbe.SynSource(new byte[10]));
+        Assert.Equal("inbound and !loopback and ip and tcp.DstPort == 8880 and tcp.Syn and !tcp.Ack", ShareReachProbe.SynFilter(8880));
+    }
+
+    [Theory]
+    [InlineData("Firewall Policy                       BlockInboundAlways,AllowOutbound", true)]
+    [InlineData("Политика брандмауэра                  BlockInboundAlways,AllowOutbound", true)]
+    [InlineData("Firewall Policy                       BlockInbound,AllowOutbound", false)]
+    public void BlockAllInboundIsRecognisedInAnyLanguage(string output, bool blocks) =>
+        Assert.Equal(blocks, ShareReachProbe.BlocksAllInbound(output));
+
+    private static ReachReport Reach(bool self = true, FirewallState? firewall = null, Dictionary<IPAddress, int>? syns = null,
+        IPAddress[]? connected = null, string? sniffError = null) =>
+        new(8880, "192.168.31.40", TimeSpan.FromSeconds(60), self, firewall ?? FirewallState.Unknown,
+            syns ?? [], connected ?? [], sniffError);
+
+    [Fact]
+    public void ReachVerdictNamesTheBrokenLeg()
+    {
+        var phone = IPAddress.Parse("192.168.31.77");
+        Assert.Contains("не отвечает даже с самого ПК", ShareReachProbe.Explain(Reach(self: false))[0]);
+        Assert.Contains("Связь в порядке: 192.168.31.77", ShareReachProbe.Explain(Reach(connected: [phone]))[0]);
+
+        var nothing = ShareReachProbe.Explain(Reach());
+        Assert.Contains("не дошло ни одной попытки", nothing[0]);
+        Assert.Contains("изоляция клиентов", nothing[1]);
+        Assert.Contains("192.168.31.40:8880", nothing[1]);
+
+        var blocked = ShareReachProbe.Explain(Reach(syns: new() { [phone] = 3 }));
+        Assert.Contains("отбрасывает брандмауэр на ПК", blocked[0]);
+        Assert.Contains("192.168.31.77 (3)", blocked[0]);
+        Assert.Contains("групповая политика", blocked[^1]);
+
+        var shields = ShareReachProbe.Explain(Reach(firewall: new FirewallState(true, ["Kaspersky"]), syns: new() { [phone] = 1 }));
+        Assert.Contains(shields, l => l.Contains("Блокировать все входящие"));
+        Assert.Contains(shields, l => l.Contains("Kaspersky") && l.Contains("порт 8880"));
+        Assert.DoesNotContain(shields, l => l.Contains("групповая политика"));
+
+        Assert.Contains("не удалось: драйвер", ShareReachProbe.Explain(Reach(sniffError: "драйвер"))[0]);
+        Assert.All(ShareReachProbe.Explain(Reach(firewall: new FirewallState(false, ["ESET"]))), l => Assert.DoesNotContain("—", l));
+    }
+
+    [Fact]
+    public async Task SelfConnectTellsAListeningPortFromAClosedOne()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        Assert.True(await ShareReachProbe.SelfConnectsAsync(IPAddress.Loopback, port, CancellationToken.None));
+        listener.Stop();
+        Assert.False(await ShareReachProbe.SelfConnectsAsync(IPAddress.Loopback, port, CancellationToken.None));
+    }
+
     [Theory]
     [InlineData("\r\nDeleted 2 rule(s).\r\nOk.\r\n", 2)]
     [InlineData("\r\nУдалено правил: 3.\r\nОК.\r\n", 3)]
@@ -672,6 +742,31 @@ public sealed class ShareTests : IAsyncDisposable
         var r = await ForwardProbe.RunAsync(dll, TimeSpan.FromSeconds(1), CancellationToken.None);
         Assert.Null(r.Error);
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), sw.Elapsed.ToString());
+    }
+
+    /// <summary>
+    /// Фильтр перехвата SYN принимается драйвером, перехват останавливается по отмене сразу, а не через минуту.
+    /// Пакетов на раннере не будет: подключение к своему адресу идёт через loopback, а его фильтр отсекает.
+    /// </summary>
+    [WinDivertFact]
+    public async Task ReachSniffOpensWithTheSynFilterAndStopsWhenAsked()
+    {
+        var dll = Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("ZS_ENGINE"))!, "WinDivert.dll");
+        Assert.Null(ZapretSmart.Core.Engine.WinDivertFilter.Check(dll, ShareReachProbe.SynFilter(8880)));
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var sw = Stopwatch.StartNew();
+        Assert.Null(await ForwardProbe.SniffAsync(dll, ShareReachProbe.SynFilter(8880), TimeSpan.FromMinutes(5), _ => { }, stop.Token));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(15), sw.Elapsed.ToString());
+    }
+
+    /// <summary>Состояние брандмауэра читается и не виснет; на раннере «блокировать все входящие» выключено.</summary>
+    [WindowsPowerShellFact]
+    public async Task FirewallStateIsReadWithoutHanging()
+    {
+        var sw = Stopwatch.StartNew();
+        var state = await ShareReachProbe.ReadFirewallAsync(CancellationToken.None);
+        Assert.False(state.BlocksAllInbound);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(45), sw.Elapsed.ToString());
     }
 
     public sealed class WindowsPowerShellFactAttribute : FactAttribute
