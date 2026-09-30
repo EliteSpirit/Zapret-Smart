@@ -13,6 +13,8 @@ namespace ZapretSmart.App.ViewModels;
 /// Раздача обхода на телефон, отдельная служба рядом с обходом ПК. Прокси открывает соединения телефона от имени ПК
 /// с портов EngineCommandBuilder.ShareLocalPorts, и их обрабатывает собственный движок раздачи со своей стратегией.
 /// Обход ПК эти порты пропускает, так что каждую службу можно включать и выключать, не трогая другую.
+/// Прокси работает в той сети, где уже есть ПК и телефон (домашний Wi-Fi). Точка доступа ПК — запасной вариант,
+/// когда общего Wi-Fi нет, и сама она не включается.
 /// </summary>
 public sealed partial class ShareViewModel : ObservableObject, IDisposable
 {
@@ -146,24 +148,58 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PacUrl))]
     [NotifyPropertyChangedFor(nameof(ProfileUrl))]
+    [NotifyPropertyChangedFor(nameof(PhonePacUrl))]
     private int _port;
 
     /// <summary>Адрес ПК, который вводится на телефоне.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PacUrl))]
     [NotifyPropertyChangedFor(nameof(HasAddress))]
-    [NotifyPropertyChangedFor(nameof(ShowLanSetup))]
-    [NotifyPropertyChangedFor(nameof(ShowLanHint))]
+    [NotifyPropertyChangedFor(nameof(ShowPhoneSetup))]
+    [NotifyPropertyChangedFor(nameof(ProfileUrl))]
+    [NotifyPropertyChangedFor(nameof(PhonePacUrl))]
     private string? _address;
 
     public bool HasAddress => IsEnabled && Address is not null;
 
-    /// <summary>Подробная инструкция для домашней сети: когда работает точка доступа ПК, главная инструкция — для неё.</summary>
-    public bool ShowLanSetup => HasAddress && !ShowPhoneSetup;
-
-    public bool ShowLanHint => HasAddress && ShowPhoneSetup;
-
     public string PacUrl => $"http://{Address}:{Port}/proxy.pac";
+
+    /// <summary>
+    /// Домашняя сеть Wi-Fi, для которой iPhone получает профиль. Если ПК подключён к ней по Wi-Fi, имя и пароль
+    /// берутся из Windows; если кабелем, их вводят руками. Пустой пароль — профиль без пароля.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ProfileUrl))]
+    [NotifyPropertyChangedFor(nameof(PhoneNetworkName))]
+    [NotifyPropertyChangedFor(nameof(HasHomeNetwork))]
+    [NotifyPropertyChangedFor(nameof(CanMakeProfile))]
+    [NotifyPropertyChangedFor(nameof(PhonePacUrl))]
+    [NotifyPropertyChangedFor(nameof(ShowPhoneSetup))]
+    private string _homeSsid = "";
+
+    [ObservableProperty] private string _homePassword = "";
+
+    /// <summary>Имя и пароль сети взяты из Windows: поля ввода не нужны.</summary>
+    [ObservableProperty] private bool _homeDetected;
+
+    [ObservableProperty] private string? _homeNote;
+
+    private bool _homeIsOpen;
+
+    public bool HasHomeNetwork => !string.IsNullOrWhiteSpace(HomeSsid);
+
+    /// <summary>Профиль iPhone можно выдать: известна домашняя сеть или работает точка доступа ПК.</summary>
+    public bool CanMakeProfile => HasHomeNetwork || UseHotspot;
+
+    /// <summary>Телефон ходит через домашнюю сеть (обычный случай) или через точку доступа ПК, если общего Wi-Fi нет.</summary>
+    private bool UseHotspot => !HasHomeNetwork && IsHotspotOn && Hotspot?.Ssid is not null;
+
+    private string PhoneHost => UseHotspot ? HotspotAddress : Address ?? "";
+
+    public string PhoneNetworkName => UseHotspot ? Hotspot!.Ssid! : HomeSsid;
+
+    /// <summary>Файл автонастройки для Android: тот же, что в профиле iPhone.</summary>
+    public string PhonePacUrl => $"http://{PhoneHost}:{Port}/proxy.pac";
 
     /// <summary>Остальные адреса ПК, если сетей несколько.</summary>
     public ObservableCollection<string> OtherAddresses { get; } = [];
@@ -171,8 +207,6 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasAddress))]
     [NotifyPropertyChangedFor(nameof(ShowPhoneSetup))]
-    [NotifyPropertyChangedFor(nameof(ShowLanSetup))]
-    [NotifyPropertyChangedFor(nameof(ShowLanHint))]
     private bool _isEnabled;
 
     [ObservableProperty] private string _status = "";
@@ -188,8 +222,10 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(HotspotText))]
     [NotifyPropertyChangedFor(nameof(IsHotspotOn))]
     [NotifyPropertyChangedFor(nameof(ShowPhoneSetup))]
-    [NotifyPropertyChangedFor(nameof(ShowLanSetup))]
-    [NotifyPropertyChangedFor(nameof(ShowLanHint))]
+    [NotifyPropertyChangedFor(nameof(ProfileUrl))]
+    [NotifyPropertyChangedFor(nameof(PhonePacUrl))]
+    [NotifyPropertyChangedFor(nameof(PhoneNetworkName))]
+    [NotifyPropertyChangedFor(nameof(CanMakeProfile))]
     [NotifyCanExecuteChangedFor(nameof(StartHotspotCommand))]
     [NotifyCanExecuteChangedFor(nameof(StopHotspotCommand))]
     private HotspotState? _hotspot;
@@ -202,9 +238,9 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     private IPAddress? _hotspotAddress;
 
     /// <summary>Короткий адрес профиля для Safari: его легко набрать руками.</summary>
-    public string ProfileUrl => $"{HotspotAddress}:{Port}/i";
+    public string ProfileUrl => $"{PhoneHost}:{Port}/i";
 
-    public bool ShowPhoneSetup => IsEnabled && IsHotspotOn && Hotspot?.Ssid is not null;
+    public bool ShowPhoneSetup => IsEnabled && (Address is not null || UseHotspot);
 
     public static readonly TimeSpan ProbeDuration = TimeSpan.FromSeconds(20);
 
@@ -241,7 +277,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
 
     public string HotspotText => Hotspot switch
     {
-        null => "Если телефон не в той же сети Wi-Fi, что ПК, включите точку доступа: ПК сам станет сетью Wi-Fi.",
+        null => "Если общего Wi-Fi нет (например, ПК подключён кабелем к модему), ПК может сам стать сетью Wi-Fi.",
         { Error: { } error } => "Точка доступа: " + error + ".",
         // Пароль показывается отдельно моноширинным шрифтом: Inter рисует «x» между цифрами как «×».
         { IsOn: true } h => $"Точка доступа включена, подключено устройств: {h.Clients}.",
@@ -304,33 +340,41 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
                 _main.AppendLog("! Раздача: " + error);
             }
         }
-        // Раздача без точки доступа ПК тоже работает (телефон в той же сети Wi-Fi), но с ней настройка телефона
-        // одноразовая, а при выключенном приложении сети с прокси просто нет. Поэтому включаем её сразу.
-        if (_manageSystem && IsHotspotAvailable) await EnsureHotspotAsync();
     }
 
-    /// <summary>Включает точку доступа, если она выключена, и запоминает, что включило её приложение.</summary>
-    private async Task EnsureHotspotAsync()
-    {
-        await RunHotspotAsync(HotspotAction.Status);
-        if (_proxy is null || Hotspot is { IsOn: true } || Hotspot?.Error is { } error && IsFatal(error)) return;
-        await RunHotspotAsync(HotspotAction.Start);
-        if (Hotspot is { IsOn: true })
-        {
-            _startedHotspot = true;
-            _main.AppendLog($"Раздача: включена точка доступа «{Hotspot.Ssid}»");
-        }
-    }
-
-    /// <summary>Ошибки, при которых пытаться включить точку доступа бессмысленно.</summary>
-    private static bool IsFatal(string error) => error.StartsWith("в этом компьютере нет Wi-Fi", StringComparison.Ordinal);
-
+    /// <summary>
+    /// Сеть для профиля iPhone. Вызывается из потока прокси; строки неизменяемые, поэтому чтение без блокировки безопасно.
+    /// </summary>
     private WifiNetwork? CurrentWifi()
     {
+        var ssid = HomeSsid.Trim();
+        if (ssid.Length > 0 && IPAddress.TryParse(Address, out var lan))
+            return new WifiNetwork(ssid, HomePassword.Length > 0 ? HomePassword : null, lan, _homeIsOpen);
         var h = Hotspot;
-        return h is { IsOn: true, Ssid: { Length: > 0 } ssid, Passphrase: { } pass }
-            ? new WifiNetwork(ssid, pass, _hotspotAddress ?? NetworkPolicy.WindowsHotspotAddress)
+        return h is { IsOn: true, Ssid: { Length: > 0 } hs, Passphrase: { } pass }
+            ? new WifiNetwork(hs, pass, _hotspotAddress ?? NetworkPolicy.WindowsHotspotAddress)
             : null;
+    }
+
+    /// <summary>Домашняя сеть из Windows: имя и пароль сохранённого профиля Wi-Fi, к которому подключён ПК.</summary>
+    private void DetectHomeNetwork()
+    {
+        if (!_manageSystem || HomeDetected) return;
+        var wifi = WindowsWifi.Current();
+        if (wifi is null)
+        {
+            HomeNote = "ПК подключён не по Wi-Fi, поэтому имя домашней сети неизвестно. Введите его, чтобы получить профиль для iPhone.";
+            return;
+        }
+        HomeSsid = wifi.Ssid;
+        HomePassword = wifi.Passphrase ?? "";
+        _homeIsOpen = wifi.IsOpen;
+        HomeDetected = true;
+        HomeNote = !wifi.IsPersonal
+            ? "Сеть с логином (корпоративная): профиль iPhone для неё не подойдёт, настройте прокси на телефоне вручную."
+            : wifi.Passphrase is null && !wifi.IsOpen
+                ? "Пароль сети прочитать не удалось: iPhone спросит его при установке профиля."
+                : null;
     }
 
     private async Task StopAsync(bool removeFirewallRule)
@@ -363,6 +407,8 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         _hotspotAddress = all.FirstOrDefault(a => a.IsWindowsHotspot)?.Address;
         OnPropertyChanged(nameof(HotspotAddress));
         OnPropertyChanged(nameof(ProfileUrl));
+        OnPropertyChanged(nameof(PhonePacUrl));
+        DetectHomeNetwork();
         Address = all.Count > 0 ? all[0].Address.ToString() : null;
         OtherAddresses.Clear();
         foreach (var a in all.Skip(1)) OtherAddresses.Add($"{a.Address} ({a.InterfaceName})");
@@ -423,8 +469,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         _engine = null;
         _engineStopRequested = true;
         engine?.Dispose();
-        // Точку доступа, которую включило приложение, гасим: без приложения в ней нет прокси, и телефон
-        // с профилем остался бы в сети без интернета. Нет сети — телефон сам уйдёт в домашний Wi-Fi или сотовую сеть.
+        // Точку доступа, которую включили кнопкой в приложении, гасим: без приложения в ней нет прокси.
         if (_startedHotspot)
         {
             try

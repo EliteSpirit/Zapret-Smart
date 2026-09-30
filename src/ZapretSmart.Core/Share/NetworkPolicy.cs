@@ -72,7 +72,13 @@ public static class NetworkPolicy
     }
 
     /// <summary>
-    /// IPv4-адреса ПК в локальных сетях, первым — сеть хот-спота Windows, потом Wi-Fi, потом остальные.
+    /// Порядок адресов: сначала домашний Wi-Fi (там телефон обычно и находится), потом кабель, сеть точки доступа ПК
+    /// последней: это запасной вариант, когда общего Wi-Fi нет.
+    /// </summary>
+    public static int Rank(bool isWindowsHotspot, bool isWireless) => isWindowsHotspot ? 2 : isWireless ? 0 : 1;
+
+    /// <summary>
+    /// IPv4-адреса ПК в локальных сетях в порядке <see cref="Rank"/>.
     /// Виртуальные адаптеры (Hyper-V, VirtualBox, WSL) пропускаются: телефону туда не попасть.
     /// </summary>
     public static IReadOnlyList<LocalAddress> FindLocalAddresses()
@@ -99,7 +105,7 @@ public static class NetworkPolicy
                 var bytes = ip.GetAddressBytes();
                 if (bytes[0] == 169 && bytes[1] == 254) continue;
                 var hotspot = ip.Equals(WindowsHotspotAddress);
-                var rank = hotspot ? 0 : nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ? 1 : 2;
+                var rank = Rank(hotspot, nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211);
                 found.Add((new LocalAddress(ip, nic.Name, hotspot), rank));
             }
         }

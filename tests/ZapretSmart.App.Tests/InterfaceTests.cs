@@ -190,6 +190,32 @@ public sealed class InterfaceTests : IDisposable
         await WaitFor(() => !vm.Share.IsEngineRunning && vm.Log.Any(l => l.Contains("Раздача: движок остановлен", StringComparison.Ordinal)));
     }
 
+    /// <summary>
+    /// Прокрутка до конца показывает страницу целиком. С Padding у ScrollViewer нижний отступ не входил в прокручиваемую
+    /// высоту, и низ настроек (карточка «Версия приложения» с кнопками) уезжал за окно. Сообщил пользователь.
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EveryScrollablePageShowsItsLastCardWhenScrolledToTheEnd(bool menuOnTop)
+    {
+        var (vm, w) = Open();
+        vm.MenuOnTop = menuOnTop;
+        var tabs = w.GetVisualDescendants().OfType<TabControl>().Single();
+        foreach (var index in new[] { 0, 2, 3 })
+        {
+            tabs.SelectedIndex = index;
+            Pump(0.3);
+            var scroll = Assert.IsType<ScrollViewer>(tabs.SelectedContent);
+            scroll.Offset = new Vector(0, 1e6);
+            Pump(0.3);
+            var last = scroll.GetVisualDescendants().OfType<Border>().Where(b => b.Classes.Contains("card") && b.IsEffectivelyVisible)
+                .OrderBy(b => b.TranslatePoint(new Point(0, b.Bounds.Height), scroll)!.Value.Y).Last();
+            var bottom = last.TranslatePoint(new Point(0, last.Bounds.Height), scroll)!.Value.Y;
+            Assert.True(bottom <= scroll.Viewport.Height - 8, $"вкладка {index}: низ последней карточки {bottom:F0} при высоте окна прокрутки {scroll.Viewport.Height:F0}");
+        }
+    }
+
     private static async Task WaitFor(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow.AddSeconds(5);
