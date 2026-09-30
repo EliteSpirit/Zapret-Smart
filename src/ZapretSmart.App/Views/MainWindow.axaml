@@ -530,6 +530,19 @@
                 </DockPanel>
               </Border>
 
+              <Border Classes="card" IsVisible="{Binding CanStartWithWindows}">
+                <DockPanel>
+                  <ToggleSwitch DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding StartWithWindows}"
+                                AutomationProperties.Name="Запускать вместе с Windows" Margin="16,0,0,0" />
+                  <StackPanel Spacing="4">
+                    <TextBlock Classes="title" Text="Запускать вместе с Windows" />
+                    <TextBlock Classes="muted" Text="При входе в Windows программа запускается свёрнутой в трей. Раздача включится сама, если в её карточке отмечено «Включать раздачу при запуске программы». Работает через Планировщик заданий: программе нужны права администратора, а из обычного автозапуска Windows такие программы не запускает." />
+                    <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource ZsDanger}" Text="{Binding AutostartStatus}"
+                               IsVisible="{Binding AutostartStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
               <Border Classes="card">
                 <StackPanel Spacing="12">
                   <DockPanel>
@@ -676,6 +689,17 @@
                             ToolTip.Tip="Ищет файрволы, антивирусы и VPN, которые не пускают телефон к ПК, и говорит, что в них выключить. До минуты." />
                     <TextBlock Text="{Binding ConflictText}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}"
                                IsVisible="{Binding ConflictText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  </StackPanel>
+
+                  <!-- Автозапуск раздачи: при запуске программы и вместе с Windows (тогда программа стартует в трее). -->
+                  <StackPanel Spacing="4">
+                    <CheckBox IsChecked="{Binding Main.ShareAutoStart}" Content="Включать раздачу при запуске программы" />
+                    <CheckBox IsChecked="{Binding Main.StartWithWindows}" IsVisible="{Binding Main.CanStartWithWindows}"
+                              Content="Запускать Zapret Smart вместе с Windows (свёрнутым в трей)" />
+                    <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding Main.CanStartWithWindows}"
+                               Text="Вместе обе галки дают раздачу сразу после включения ПК, без открытия окна. Автозапуск идёт через Планировщик заданий с правами администратора: иначе Windows не запустит программу при входе." />
+                    <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource ZsDanger}" Text="{Binding Main.AutostartStatus}"
+                               IsVisible="{Binding Main.AutostartStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                   </StackPanel>
 
                   <!-- Запасной вариант, когда общего Wi-Fi нет: ПК сам становится сетью. Не включается сам. -->

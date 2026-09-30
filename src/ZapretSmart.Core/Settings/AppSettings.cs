@@ -34,6 +34,12 @@ public sealed record AppSettings
     /// <summary>Прокси для телефона в локальной сети: его соединения открывает ПК, и обход их обрабатывает. По умолчанию выключен.</summary>
     public bool ShareEnabled { get; init; }
 
+    /// <summary>
+    /// Включать раздачу при каждом запуске программы, даже если в прошлый раз её выключили. Без этой настройки
+    /// раздача при запуске просто остаётся такой, какой была.
+    /// </summary>
+    public bool ShareAutoStart { get; init; }
+
     /// <summary>Стратегия движка раздачи. Пусто — та же, что выбрана для обхода ПК.</summary>
     public string? ShareStrategyId { get; init; }
 
