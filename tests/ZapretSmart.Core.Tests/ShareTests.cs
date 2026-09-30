@@ -700,6 +700,7 @@ public sealed class ShareTests : IAsyncDisposable
     [WindowsPowerShellFact]
     public async Task FirewallRuleIsAddedAndRemoved()
     {
+        using var serial = FirewallTestLock.Take();
         var program = @"C:\Program Files\Zapret Smart Test\ZapretSmart.exe";
         Assert.Null((await ShareFirewall.AllowAsync(program, 48880, CancellationToken.None)).Error);
         try
@@ -722,6 +723,7 @@ public sealed class ShareTests : IAsyncDisposable
     [WindowsPowerShellFact]
     public async Task FirewallRuleRemovesWindowsBlockForTheProgramOnly()
     {
+        using var serial = FirewallTestLock.Take();
         var program = @"C:\Program Files\Zapret Smart Test\ZapretSmart.exe";
         var other = @"C:\Program Files\Zapret Smart Test\Other.exe";
         const string windowsBlock = "zs-test-zapretsmart.exe";
@@ -743,6 +745,39 @@ public sealed class ShareTests : IAsyncDisposable
             Netsh("advfirewall", "firewall", "delete", "rule", $"name={windowsBlock}");
             Netsh("advfirewall", "firewall", "delete", "rule", $"name={otherBlock}");
         }
+    }
+
+    private static ProcessStartInfo Shell(string script) => OperatingSystem.IsWindows()
+        ? new ProcessStartInfo("cmd.exe") { ArgumentList = { "/c", script } }
+        : new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", script } };
+
+    [Fact]
+    public async Task ProcessRunnerReturnsCodeAndBothStreams()
+    {
+        var r = await ProcessRunner.RunAsync(Shell(OperatingSystem.IsWindows() ? "echo out& echo err 1>&2& exit 3" : "echo out; echo err 1>&2; exit 3"), TimeSpan.FromSeconds(20), CancellationToken.None);
+        Assert.Null(r.StartError);
+        Assert.False(r.TimedOut);
+        Assert.Equal(3, r.ExitCode);
+        Assert.Contains("out", r.Output);
+        Assert.Contains("err", r.Errors);
+    }
+
+    [Fact]
+    public async Task ProcessRunnerKillsAHungProcessInsteadOfWaiting()
+    {
+        var sw = Stopwatch.StartNew();
+        var r = await ProcessRunner.RunAsync(Shell(OperatingSystem.IsWindows() ? "ping -n 60 127.0.0.1 >nul" : "sleep 60"), TimeSpan.FromMilliseconds(500), CancellationToken.None);
+        Assert.True(r.TimedOut);
+        Assert.Equal(-1, r.ExitCode);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(15), sw.Elapsed.ToString());
+    }
+
+    [Fact]
+    public async Task ProcessRunnerReportsAMissingProgramInsteadOfThrowing()
+    {
+        var r = await ProcessRunner.RunAsync(new ProcessStartInfo("zs-no-such-program-" + Guid.NewGuid().ToString("N")), TimeSpan.FromSeconds(5), CancellationToken.None);
+        Assert.NotNull(r.StartError);
+        Assert.Contains("не запустился", r.StartError);
     }
 
     private static string Netsh(params string[] args)

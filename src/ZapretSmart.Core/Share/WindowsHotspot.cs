@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using ZapretSmart.Core.Updates;
 
@@ -29,32 +30,17 @@ public static class WindowsHotspot
         await File.WriteAllTextAsync(script, Script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct);
         var psi = new ProcessStartInfo("powershell.exe")
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
             ArgumentList = { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Action", action.ToString().ToLowerInvariant() },
         };
         UpdateInstaller.IsolateFromPowerShell7(psi);
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("не удалось запустить powershell.exe");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(Timeout);
-        try
-        {
-            var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var errors = process.StandardError.ReadToEndAsync(timeout.Token);
-            await process.WaitForExitAsync(timeout.Token);
-            var state = Parse(await output);
-            var err = (await errors).Trim();
-            return state.Error is null && state.Ssid is null && err.Length > 0 ? HotspotState.Failed(FirstLine(err)) : state;
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-            return HotspotState.Failed("Windows не ответила за " + (int)Timeout.TotalSeconds + " с");
-        }
+        var result = await ProcessRunner.RunAsync(psi, Timeout, ct);
+        if (result.StartError is { } startError) return HotspotState.Failed(startError);
+        if (result.TimedOut) return HotspotState.Failed("Windows не ответила за " + (int)Timeout.TotalSeconds + " с");
+        var state = Parse(result.Output);
+        var err = result.Errors.Trim();
+        return state.Error is null && state.Ssid is null && err.Length > 0 ? HotspotState.Failed(FirstLine(err)) : state;
     }
 
     /// <summary>Вывод скрипта: строки «ключ: значение». Ошибка перекрывает остальное.</summary>
@@ -193,20 +179,42 @@ public static class ShareFirewall
 
     public static async Task RemoveAsync(CancellationToken ct) => await RunAsync(DeleteArguments, ct);
 
+    /// <summary>Сколько ждать netsh. Дольше он не работает; зависший netsh не должен держать раздачу выключенной.</summary>
+    public static readonly TimeSpan NetshTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Кодировка вывода netsh: OEM-кодовая страница системы (в русской Windows 866). Берётся у системы, а не у
+    /// региональных форматов пользователя: при русской Windows с английскими форматами они расходятся.
+    /// </summary>
+    private static readonly Lazy<Encoding> ConsoleEncoding = new(() =>
+    {
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding((int)GetOEMCP());
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or EntryPointNotFoundException or DllNotFoundException)
+        {
+            return Encoding.UTF8;
+        }
+    });
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetOEMCP();
+
+    /// <summary>netsh через ProcessRunner: не бросает и не виснет. Если не запустился или не ответил, код -1 и причина.</summary>
     private static async Task<(int Code, string Output)> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
     {
         if (!OperatingSystem.IsWindows()) return (0, "");
         var psi = new ProcessStartInfo("netsh")
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            StandardOutputEncoding = ConsoleEncoding.Value,
+            StandardErrorEncoding = ConsoleEncoding.Value,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
-        using var process = Process.Start(psi)!;
-        var output = await process.StandardOutput.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        return (process.ExitCode, output);
+        var result = await ProcessRunner.RunAsync(psi, NetshTimeout, ct);
+        if (result.StartError is { } startError) return (-1, startError);
+        if (result.TimedOut) return (-1, $"netsh не ответил за {NetshTimeout.TotalSeconds:0} с");
+        return (result.ExitCode, result.Output + result.Errors);
     }
 }

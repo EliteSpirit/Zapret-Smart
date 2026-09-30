@@ -11,7 +11,8 @@ public sealed record AppPaths(
     string UserStrategiesDir,
     string SettingsFile,
     string? HostsFile = null,
-    bool ManageSystem = false)
+    bool ManageSystem = false,
+    string? FirewallProgram = null)
 {
     /// <summary>Папка данных пользователя: настройки, резервная копия hosts, журнал обновления.</summary>
     public string DataDir => Path.GetDirectoryName(SettingsFile)!;

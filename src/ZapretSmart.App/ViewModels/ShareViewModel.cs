@@ -42,7 +42,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         _loading = true;
         IsEnabled = enabled;
         _loading = false;
-        if (enabled) _ = StartAsync();
+        if (enabled) _ = StartSafelyAsync();
     }
 
     public bool IsHotspotAvailable => OperatingSystem.IsWindows();
@@ -292,16 +292,54 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     {
         if (_loading) return;
         _main.SaveShareEnabled(value);
-        _ = value ? StartAsync() : StopAsync(removeFirewallRule: true);
+        _ = value ? StartSafelyAsync() : StopSafelyAsync(removeFirewallRule: true);
+    }
+
+    /// <summary>
+    /// Запуск раздачи без броска в пустоту: исключение попадает в журнал и в статус карточки. Иначе прокси молча
+    /// не запускался бы, а в журнале не было бы ни строки.
+    /// </summary>
+    private async Task StartSafelyAsync()
+    {
+        try
+        {
+            await StartAsync();
+        }
+        catch (Exception e)
+        {
+            // Полный текст с местом ошибки идёт только в файл: его присылают для разбора.
+            _log.Write("! " + e);
+            Log($"раздача не запустилась: {e.GetType().Name}: {e.Message}", warning: true);
+            // Всё, что успело запуститься (прокси, правило брандмауэра), снимается: карточка не должна говорить
+            // «не запустилась», пока порт на самом деле открыт.
+            await StopSafelyAsync(removeFirewallRule: true);
+            Status = "Раздача не запустилась: " + e.Message;
+        }
+    }
+
+    private async Task StopSafelyAsync(bool removeFirewallRule)
+    {
+        try
+        {
+            await StopAsync(removeFirewallRule);
+        }
+        catch (Exception e)
+        {
+            _log.Write("! " + e);
+            Log($"раздача остановилась с ошибкой: {e.GetType().Name}: {e.Message}", warning: true);
+        }
     }
 
     private async Task StartAsync()
     {
         if (_proxy is not null) return;
+        Log($"включаю раздачу на порту {Port}");
         // Правило ставится до открытия порта: иначе Windows успевает спросить «разрешить доступ?», и после «Отмены»
-        // её запрет перекрывает наше разрешение.
-        if (_manageSystem && Environment.ProcessPath is { } exe)
+        // её запрет перекрывает наше разрешение. Если netsh не справился, порт всё равно открывается.
+        if (_manageSystem && FirewallProgram is { } exe)
         {
+            // Полный путь не пишется: в нём обычно имя пользователя Windows, а журнал присылают.
+            Log("ставлю правило брандмауэра для " + Path.GetFileName(exe));
             var firewall = await ShareFirewall.AllowAsync(exe, Port, CancellationToken.None);
             if (firewall.Error is { } error)
             {
@@ -313,10 +351,16 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
                 Log($"брандмауэр открыт для порта {Port} из локальной сети");
             }
             if (firewall.RemovedProgramRules > 0)
-                Log($"сняты прежние правила брандмауэра для ZapretSmart.exe ({firewall.RemovedProgramRules}), в том числе запреты Windows");
+                Log($"сняты прежние правила брандмауэра для {Path.GetFileName(exe)} ({firewall.RemovedProgramRules}), в том числе запреты Windows");
         }
-        // Пока ставилось правило, раздачу могли выключить или запустить повторно.
-        if (!IsEnabled || _proxy is not null) return;
+        // Пока ставилось правило, раздачу могли выключить (выключение успело снять правило раньше, чем мы его
+        // поставили) или запустить повторно.
+        if (_proxy is not null) return;
+        if (!IsEnabled)
+        {
+            if (_manageSystem) await ShareFirewall.RemoveAsync(CancellationToken.None);
+            return;
+        }
         var proxy = new ShareProxy(new ShareProxyOptions
         {
             Port = Port,
@@ -328,12 +372,15 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         {
             proxy.Start();
         }
-        catch (SocketException e)
+        catch (Exception e)
         {
             await proxy.DisposeAsync();
-            Status = e.SocketErrorCode == SocketError.AddressAlreadyInUse
+            if (e is not SocketException socket) throw;
+            Status = socket.SocketErrorCode == SocketError.AddressAlreadyInUse
                 ? $"Порт {Port} занят другой программой. Раздача не включилась."
-                : "Не удалось включить раздачу: " + e.Message;
+                : "Не удалось включить раздачу: " + socket.Message;
+            Log(Status, warning: true);
+            if (_manageSystem) await ShareFirewall.RemoveAsync(CancellationToken.None);
             return;
         }
         _proxy = proxy;
@@ -514,6 +561,9 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     }
 
     public string LogFile => _log.FilePath;
+
+    /// <summary>Программа, для которой ставится правило брандмауэра: сам ZapretSmart.exe, в тестах подставной путь.</summary>
+    private string? FirewallProgram => _main.Paths.FirewallProgram ?? Environment.ProcessPath;
 
     [RelayCommand]
     private void OpenLog()
