@@ -157,10 +157,22 @@ public static class ShareFirewall
 
     public static IReadOnlyList<string> DeleteArguments => ["advfirewall", "firewall", "delete", "rule", $"name={RuleName}"];
 
-    /// <summary>Ставит правило заново: старое (со старым портом или путём) удаляется. Возвращает текст ошибки или null.</summary>
+    /// <summary>
+    /// Все входящие правила для программы, в том числе запрещающие. Windows создаёт их сама, если на её вопрос
+    /// «разрешить доступ?» ответили «Отмена» или окно закрылось, а запрет в брандмауэре сильнее любого разрешения:
+    /// с ним телефон получает таймаут, хотя наше правило стоит.
+    /// </summary>
+    public static IReadOnlyList<string> DeleteProgramArguments(string program) =>
+        ["advfirewall", "firewall", "delete", "rule", "name=all", "dir=in", $"program={program}"];
+
+    /// <summary>
+    /// Ставит правило заново: старое (со старым портом или путём) и чужие входящие правила для этой программы
+    /// удаляются. Вызывать до открытия порта, иначе Windows успеет показать свой вопрос. Возвращает текст ошибки или null.
+    /// </summary>
     public static async Task<string?> AllowAsync(string program, int port, CancellationToken ct)
     {
         await RunAsync(DeleteArguments, ct);
+        await RunAsync(DeleteProgramArguments(program), ct);
         var (code, output) = await RunAsync(AddArguments(program, port), ct);
         return code == 0 ? null : "не удалось открыть порт в брандмауэре: " + output.Trim();
     }

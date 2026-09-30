@@ -562,6 +562,34 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.DoesNotContain("48880", Netsh("advfirewall", "firewall", "show", "rule", $"name={ShareFirewall.RuleName}"));
     }
 
+    /// <summary>
+    /// Запрет, который Windows ставит после «Отмены» в своём окне, сильнее нашего разрешения: без его снятия телефон
+    /// получает таймаут. Правила для других программ не трогаются.
+    /// </summary>
+    [WindowsPowerShellFact]
+    public async Task FirewallRuleRemovesWindowsBlockForTheProgramOnly()
+    {
+        var program = @"C:\Program Files\Zapret Smart Test\ZapretSmart.exe";
+        var other = @"C:\Program Files\Zapret Smart Test\Other.exe";
+        const string windowsBlock = "zs-test-zapretsmart.exe";
+        const string otherBlock = "zs-test-other.exe";
+        Netsh("advfirewall", "firewall", "add", "rule", $"name={windowsBlock}", "dir=in", "action=block", "protocol=TCP", $"program={program}", "profile=any");
+        Netsh("advfirewall", "firewall", "add", "rule", $"name={otherBlock}", "dir=in", "action=block", "protocol=TCP", $"program={other}", "profile=any");
+        try
+        {
+            Assert.Null(await ShareFirewall.AllowAsync(program, 48881, CancellationToken.None));
+            Assert.DoesNotContain(windowsBlock, Netsh("advfirewall", "firewall", "show", "rule", $"name={windowsBlock}"));
+            Assert.Contains(otherBlock, Netsh("advfirewall", "firewall", "show", "rule", $"name={otherBlock}"));
+            Assert.Contains("48881", Netsh("advfirewall", "firewall", "show", "rule", $"name={ShareFirewall.RuleName}", "verbose"));
+        }
+        finally
+        {
+            await ShareFirewall.RemoveAsync(CancellationToken.None);
+            Netsh("advfirewall", "firewall", "delete", "rule", $"name={windowsBlock}");
+            Netsh("advfirewall", "firewall", "delete", "rule", $"name={otherBlock}");
+        }
+    }
+
     private static string Netsh(params string[] args)
     {
         var psi = new ProcessStartInfo("netsh") { RedirectStandardOutput = true, UseShellExecute = false };

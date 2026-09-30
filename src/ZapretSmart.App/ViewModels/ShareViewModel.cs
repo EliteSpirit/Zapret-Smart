@@ -294,6 +294,19 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     private async Task StartAsync()
     {
         if (_proxy is not null) return;
+        // Правило ставится до открытия порта: иначе Windows успевает спросить «разрешить доступ?», и после «Отмены»
+        // её запрет перекрывает наше разрешение.
+        if (_manageSystem && Environment.ProcessPath is { } exe)
+        {
+            var error = await ShareFirewall.AllowAsync(exe, Port, CancellationToken.None);
+            if (error is not null)
+            {
+                Status = error + ". Телефон может не достучаться до ПК.";
+                _main.AppendLog("! Раздача: " + error);
+            }
+        }
+        // Пока ставилось правило, раздачу могли выключить или запустить повторно.
+        if (!IsEnabled || _proxy is not null) return;
         var proxy = new ShareProxy(new ShareProxyOptions
         {
             Port = Port,
@@ -330,16 +343,6 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         RefreshAddresses();
         _main.AppendLog($"Раздача: прокси слушает порт {Port}");
         StartEngine();
-
-        if (_manageSystem && Environment.ProcessPath is { } exe)
-        {
-            var error = await ShareFirewall.AllowAsync(exe, Port, CancellationToken.None);
-            if (error is not null)
-            {
-                Status = error + ". Телефон может не достучаться до ПК.";
-                _main.AppendLog("! Раздача: " + error);
-            }
-        }
     }
 
     /// <summary>
