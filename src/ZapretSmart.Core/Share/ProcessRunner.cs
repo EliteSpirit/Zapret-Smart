@@ -9,6 +9,29 @@ public sealed record ProcessResult(int ExitCode, string Output, string Errors, b
 /// <summary>Запуск служебных программ Windows (netsh, powershell) так, чтобы они не могли подвесить или уронить приложение.</summary>
 public static class ProcessRunner
 {
+    private static readonly Lazy<System.Text.Encoding> Console = new(() =>
+    {
+        try
+        {
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            return System.Text.Encoding.GetEncoding((int)GetOEMCP());
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or EntryPointNotFoundException or DllNotFoundException)
+        {
+            return System.Text.Encoding.UTF8;
+        }
+    });
+
+    /// <summary>
+    /// Кодировка вывода консольных программ Windows (netsh, auditpol, wevtutil): OEM-кодовая страница системы, в русской
+    /// Windows 866. Берётся у системы, а не у региональных форматов пользователя: при русской Windows с английскими
+    /// форматами они расходятся.
+    /// </summary>
+    public static System.Text.Encoding ConsoleEncoding => Console.Value;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern uint GetOEMCP();
+
     /// <summary>Сколько ждать, пока закроются потоки убитого процесса.</summary>
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(5);
 
