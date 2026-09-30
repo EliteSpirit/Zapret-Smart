@@ -460,7 +460,12 @@ public sealed class ShareTests : IAsyncDisposable
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         Assert.True(await ShareReachProbe.SelfConnectsAsync(IPAddress.Loopback, port, CancellationToken.None));
         listener.Stop();
-        Assert.False(await ShareReachProbe.SelfConnectsAsync(IPAddress.Loopback, port, CancellationToken.None));
+
+        // Порт занят сокетом без Listen: подключение получает отказ, и параллельный тест этот порт не займёт.
+        using var closed = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        closed.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        var closedPort = ((IPEndPoint)closed.LocalEndPoint!).Port;
+        Assert.False(await ShareReachProbe.SelfConnectsAsync(IPAddress.Loopback, closedPort, CancellationToken.None));
     }
 
     [Theory]
