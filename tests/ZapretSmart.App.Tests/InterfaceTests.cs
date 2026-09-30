@@ -188,6 +188,13 @@ public sealed class InterfaceTests : IDisposable
 
         vm.Share.IsEnabled = false;
         await WaitFor(() => !vm.Share.IsEngineRunning && vm.Log.Any(l => l.Contains("Раздача: движок остановлен", StringComparison.Ordinal)));
+
+        // Те же строки лежат в share.log со временем: этот файл пользователь может прислать.
+        var shareLog = File.ReadAllText(Path.Combine(_data, "share.log"));
+        Assert.Contains("прокси слушает порт", shareLog);
+        Assert.Contains("> winws", shareLog);
+        Assert.Contains("движок остановлен", shareLog);
+        Assert.Equal(Path.Combine(_data, "share.log"), vm.Share.LogFile);
     }
 
     /// <summary>

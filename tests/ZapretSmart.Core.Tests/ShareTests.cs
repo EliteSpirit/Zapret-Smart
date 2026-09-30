@@ -246,6 +246,159 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.DoesNotContain("evil", response);
     }
 
+    /// <summary>Каждый исход запроса попадает в журнал: по нему видно, дошёл ли телефон до ПК и что ему ответили.</summary>
+    [Fact]
+    public async Task EveryRequestOutcomeIsLogged()
+    {
+        var site = Site();
+        var logged = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var proxy = Proxy(new ShareProxyOptions
+        {
+            Port = 0, BindAddress = IPAddress.Loopback, AllowDestination = _ => true, HeaderTimeout = TimeSpan.FromMilliseconds(300),
+            Resolve = (host, _) => host == "site.test" ? Task.FromResult(new[] { IPAddress.Loopback })
+                : throw new SocketException((int)SocketError.HostNotFound),
+        });
+        proxy.Logged += (ip, text) => logged.Enqueue($"{ip} {text}");
+
+        async Task<string> Ask(string request)
+        {
+            using var phone = await Connect(proxy.Port);
+            await Send(phone, request);
+            return await ReadUntil(phone, "", toEnd: true);
+        }
+
+        await Ask("GET /proxy.pac HTTP/1.1\r\n\r\n");
+        await Ask("GET /i HTTP/1.1\r\n\r\n");
+        await Ask("GET /favicon.ico HTTP/1.1\r\n\r\n");
+        await Ask("CONNECT nowhere.invalid:443 HTTP/1.1\r\n\r\n");
+        await Ask("CONNECT example.com:25 HTTP/1.1\r\n\r\n");
+        await Ask("GARBAGE\r\n\r\n");
+        await Ask("CONNECT slow.test:443 HTTP/1.1\r\n");
+        using (var phone = await Connect(proxy.Port))
+        {
+            await Send(phone, $"CONNECT site.test:{site.Port} HTTP/1.1\r\n\r\n");
+            Assert.StartsWith("HTTP/1.1 200", await ReadUntil(phone, "\r\n\r\n"));
+            (await site.Accepted).Dispose();
+        }
+
+        var lines = logged.ToArray();
+        Assert.All(lines, l => Assert.StartsWith("127.0.0.1 ", l));
+        Assert.Contains(lines, l => l.Contains("забрал файл автонастройки proxy.pac"));
+        Assert.Contains(lines, l => l.Contains("просил профиль iPhone, но имя сети Wi-Fi не задано"));
+        Assert.Contains(lines, l => l.Contains("открыл адрес /favicon.ico, такого нет"));
+        Assert.Contains(lines, l => l.Contains("nowhere.invalid:443: имя не найдено в DNS"));
+        Assert.Contains(lines, l => l.Contains("example.com:25: порт запрещён"));
+        Assert.Contains(lines, l => l.Contains("непонятный запрос"));
+        Assert.Contains(lines, l => l.Contains("не прислал запрос за 0 с"));
+        Assert.Contains(lines, l => l.Contains($"открыл site.test:{site.Port}"));
+    }
+
+    [Fact]
+    public async Task SuccessfulConnectionsAreLoggedOncePerServer()
+    {
+        var logged = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var proxy = Proxy();
+        proxy.Logged += (_, text) => logged.Enqueue(text);
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        try
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                using var phone = await Connect(proxy.Port);
+                await Send(phone, $"CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n");
+                Assert.StartsWith("HTTP/1.1 200", await ReadUntil(phone, "\r\n\r\n"));
+                (await listener.AcceptSocketAsync().WaitAsync(TimeSpan.FromSeconds(10))).Dispose();
+            }
+        }
+        finally
+        {
+            listener.Stop();
+        }
+        var other = Site();
+        using (var phone = await Connect(proxy.Port))
+        {
+            await Send(phone, $"CONNECT 127.0.0.1:{other.Port} HTTP/1.1\r\n\r\n");
+            Assert.StartsWith("HTTP/1.1 200", await ReadUntil(phone, "\r\n\r\n"));
+            (await other.Accepted).Dispose();
+        }
+        Assert.Single(logged, $"открыл 127.0.0.1:{port}");
+        Assert.Single(logged, $"открыл 127.0.0.1:{other.Port}");
+    }
+
+    [Fact]
+    public void ClientTextIsShortenedAndStrippedBeforeLogging()
+    {
+        Assert.Equal("ab", ShareProxy.Clean("a\r\nb"));
+        var cleaned = ShareProxy.Clean(new string('x', 200));
+        Assert.Equal(81, cleaned.Length);
+        Assert.EndsWith("…", cleaned);
+    }
+
+    private sealed class ManualTime(DateTimeOffset start) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = start;
+        public override DateTimeOffset GetUtcNow() => Now;
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+    }
+
+    [Fact]
+    public void ShareLogWritesTimedLinesAndCollapsesOnlyRequestedRepeats()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "zs-sharelog-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var time = new ManualTime(new DateTimeOffset(2026, 9, 30, 12, 0, 0, TimeSpan.Zero));
+            var log = new ShareLog(Path.Combine(dir, "share.log"), time);
+            Assert.True(log.Write("192.168.1.5: сервер не отвечает", collapseRepeats: true));
+            Assert.False(log.Write("192.168.1.5: сервер не отвечает", collapseRepeats: true));
+            Assert.True(log.Write("движок остановлен"));
+            Assert.True(log.Write("движок остановлен"));
+            time.Now += ShareLog.RepeatInterval;
+            Assert.True(log.Write("192.168.1.5: сервер не отвечает", collapseRepeats: true));
+
+            var lines = File.ReadAllLines(log.FilePath);
+            Assert.Equal(
+            [
+                "2026-09-30 12:00:00 192.168.1.5: сервер не отвечает",
+                "2026-09-30 12:00:00 движок остановлен",
+                "2026-09-30 12:00:00 движок остановлен",
+                "2026-09-30 12:01:00 192.168.1.5: сервер не отвечает",
+            ], lines);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ShareLogRollsOverPastOneMegabyte()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "zs-sharelog-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var log = new ShareLog(Path.Combine(dir, "share.log"));
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(log.FilePath, new string('x', (int)ShareLog.MaxBytes + 1));
+            log.Write("после ротации");
+            Assert.Equal(ShareLog.MaxBytes + 1, new FileInfo(log.OldFilePath).Length);
+            Assert.EndsWith("после ротации", File.ReadAllText(log.FilePath).TrimEnd());
+            Assert.Equal(Path.Combine(dir, "share.old.log"), log.OldFilePath);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("\r\nDeleted 2 rule(s).\r\nOk.\r\n", 2)]
+    [InlineData("\r\nУдалено правил: 3.\r\nОК.\r\n", 3)]
+    [InlineData("Ok.", 1)]
+    public void DeletedFirewallRulesAreCounted(string output, int count) => Assert.Equal(count, ShareFirewall.CountDeleted(output));
+
     [Theory]
     [InlineData("GARBAGE\r\n\r\n", "400")]
     [InlineData("CONNECT no-port-here:x HTTP/1.1\r\n\r\n", "400")]
@@ -548,7 +701,7 @@ public sealed class ShareTests : IAsyncDisposable
     public async Task FirewallRuleIsAddedAndRemoved()
     {
         var program = @"C:\Program Files\Zapret Smart Test\ZapretSmart.exe";
-        Assert.Null(await ShareFirewall.AllowAsync(program, 48880, CancellationToken.None));
+        Assert.Null((await ShareFirewall.AllowAsync(program, 48880, CancellationToken.None)).Error);
         try
         {
             var shown = Netsh("advfirewall", "firewall", "show", "rule", $"name={ShareFirewall.RuleName}", "verbose");
@@ -560,6 +713,36 @@ public sealed class ShareTests : IAsyncDisposable
             await ShareFirewall.RemoveAsync(CancellationToken.None);
         }
         Assert.DoesNotContain("48880", Netsh("advfirewall", "firewall", "show", "rule", $"name={ShareFirewall.RuleName}"));
+    }
+
+    /// <summary>
+    /// Запрет, который Windows ставит после «Отмены» в своём окне, сильнее нашего разрешения: без его снятия телефон
+    /// получает таймаут. Правила для других программ не трогаются.
+    /// </summary>
+    [WindowsPowerShellFact]
+    public async Task FirewallRuleRemovesWindowsBlockForTheProgramOnly()
+    {
+        var program = @"C:\Program Files\Zapret Smart Test\ZapretSmart.exe";
+        var other = @"C:\Program Files\Zapret Smart Test\Other.exe";
+        const string windowsBlock = "zs-test-zapretsmart.exe";
+        const string otherBlock = "zs-test-other.exe";
+        Netsh("advfirewall", "firewall", "add", "rule", $"name={windowsBlock}", "dir=in", "action=block", "protocol=TCP", $"program={program}", "profile=any");
+        Netsh("advfirewall", "firewall", "add", "rule", $"name={otherBlock}", "dir=in", "action=block", "protocol=TCP", $"program={other}", "profile=any");
+        try
+        {
+            var result = await ShareFirewall.AllowAsync(program, 48881, CancellationToken.None);
+            Assert.Null(result.Error);
+            Assert.Equal(1, result.RemovedProgramRules);
+            Assert.DoesNotContain(windowsBlock, Netsh("advfirewall", "firewall", "show", "rule", $"name={windowsBlock}"));
+            Assert.Contains(otherBlock, Netsh("advfirewall", "firewall", "show", "rule", $"name={otherBlock}"));
+            Assert.Contains("48881", Netsh("advfirewall", "firewall", "show", "rule", $"name={ShareFirewall.RuleName}", "verbose"));
+        }
+        finally
+        {
+            await ShareFirewall.RemoveAsync(CancellationToken.None);
+            Netsh("advfirewall", "firewall", "delete", "rule", $"name={windowsBlock}");
+            Netsh("advfirewall", "firewall", "delete", "rule", $"name={otherBlock}");
+        }
     }
 
     private static string Netsh(params string[] args)

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using Avalonia.Threading;
@@ -24,6 +25,8 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     /// <summary>Точку доступа включило приложение: значит, и выключает её приложение (при выключении раздачи и на выходе).</summary>
     private bool _startedHotspot;
     private readonly HashSet<IPAddress> _reportedStrangers = [];
+    private readonly HashSet<IPAddress> _seenClients = [];
+    private readonly ShareLog _log;
     private ShareProxy? _proxy;
     private EngineRunner? _engine;
     private bool _engineStopRequested;
@@ -34,6 +37,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     {
         _main = main;
         _manageSystem = manageSystem;
+        _log = new ShareLog(Path.Combine(main.Paths.DataDir, "share.log"));
         Port = port;
         _loading = true;
         IsEnabled = enabled;
@@ -94,12 +98,12 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         }
         catch (StrategyRejectedException e)
         {
-            foreach (var err in e.Errors) _main.AppendLog("! Раздача: " + err);
+            foreach (var err in e.Errors) Log(err, warning: true);
             Status = "Стратегия раздачи не прошла проверку, обхода для телефона нет.";
             return;
         }
-        foreach (var w in cmd.Warnings) _main.AppendLog("! Раздача: " + w);
-        _main.AppendLog("Раздача: > winws " + string.Join(' ', cmd.Argv));
+        foreach (var w in cmd.Warnings) Log(w, warning: true);
+        Log("> winws " + string.Join(' ', cmd.Argv));
         var runner = new EngineRunner(_main.Paths.EngineExe);
         // stderr EngineRunner тоже отдаёт через Output, отдельная подписка на ErrorOutput удвоила бы строки.
         runner.Output += line => Dispatcher.UIThread.Post(() => _main.AppendLog("[раздача] " + line));
@@ -112,7 +116,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
             runner.Dispose();
-            _main.AppendLog("! Раздача: не удалось запустить движок: " + e.Message);
+            Log("не удалось запустить движок: " + e.Message, warning: true);
             Status = "Не удалось запустить движок раздачи, обхода для телефона нет.";
             return;
         }
@@ -128,7 +132,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         IsEngineRunning = false;
         runner.Dispose();
         if (_engineStopRequested) return;
-        _main.AppendLog($"! Раздача: движок завершился с кодом {code}");
+        Log($"движок завершился с кодом {code}", warning: true);
         Status = "Движок раздачи остановился, телефон получает интернет без обхода. Выключите и включите раздачу или выберите другую стратегию.";
     }
 
@@ -141,7 +145,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         IsEngineRunning = false;
         await runner.StopAsync();
         runner.Dispose();
-        _main.AppendLog("Раздача: движок остановлен");
+        Log("движок остановлен");
     }
 
     /// <summary>Порт, на котором прокси слушает. До запуска — порт из настроек.</summary>
@@ -294,6 +298,25 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     private async Task StartAsync()
     {
         if (_proxy is not null) return;
+        // Правило ставится до открытия порта: иначе Windows успевает спросить «разрешить доступ?», и после «Отмены»
+        // её запрет перекрывает наше разрешение.
+        if (_manageSystem && Environment.ProcessPath is { } exe)
+        {
+            var firewall = await ShareFirewall.AllowAsync(exe, Port, CancellationToken.None);
+            if (firewall.Error is { } error)
+            {
+                Status = error + ". Телефон может не достучаться до ПК.";
+                Log(error, warning: true);
+            }
+            else
+            {
+                Log($"брандмауэр открыт для порта {Port} из локальной сети");
+            }
+            if (firewall.RemovedProgramRules > 0)
+                Log($"сняты прежние правила брандмауэра для ZapretSmart.exe ({firewall.RemovedProgramRules}), в том числе запреты Windows");
+        }
+        // Пока ставилось правило, раздачу могли выключить или запустить повторно.
+        if (!IsEnabled || _proxy is not null) return;
         var proxy = new ShareProxy(new ShareProxyOptions
         {
             Port = Port,
@@ -315,31 +338,29 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         }
         _proxy = proxy;
         Port = proxy.Port;
-        proxy.ClientConnected += ip => Dispatcher.UIThread.Post(() => LastClient = $"Последнее подключение: {ip} в {DateTime.Now:HH:mm}");
+        proxy.ClientConnected += ip => Dispatcher.UIThread.Post(() =>
+        {
+            LastClient = $"Последнее подключение: {ip} в {DateTime.Now:HH:mm}";
+            if (_seenClients.Add(ip)) Log($"подключилось устройство {ip}");
+        });
         proxy.ClientRejected += ip => Dispatcher.UIThread.Post(() =>
         {
-            if (_reportedStrangers.Add(ip)) _main.AppendLog($"! Раздача: отклонено подключение не из локальной сети ({ip})");
+            if (_reportedStrangers.Add(ip)) Log($"отклонено подключение не из локальной сети ({ip})", warning: true);
         });
+        proxy.Logged += (ip, text) => Dispatcher.UIThread.Post(() => Log($"{ip}: {text}", collapseRepeats: true));
         proxy.OutboundPortsExhausted += () => Dispatcher.UIThread.Post(() =>
         {
             if (_reportedExhausted) return;
             _reportedExhausted = true;
             var (low, high) = EngineCommandBuilder.ShareLocalPorts;
-            _main.AppendLog($"! Раздача: заняты все порты {low}–{high}, часть соединений телефона идёт без обхода");
+            Log($"заняты все порты {low}–{high}, часть соединений телефона идёт без обхода", warning: true);
         });
         RefreshAddresses();
-        _main.AppendLog($"Раздача: прокси слушает порт {Port}");
+        Log(Address is null
+            ? $"прокси слушает порт {Port}, но ПК не в локальной сети"
+            : $"прокси слушает порт {Port}, адрес для телефона {Address}:{Port}"
+              + (OtherAddresses.Count > 0 ? $", другие адреса ПК: {string.Join(", ", OtherAddresses)}" : ""));
         StartEngine();
-
-        if (_manageSystem && Environment.ProcessPath is { } exe)
-        {
-            var error = await ShareFirewall.AllowAsync(exe, Port, CancellationToken.None);
-            if (error is not null)
-            {
-                Status = error + ". Телефон может не достучаться до ПК.";
-                _main.AppendLog("! Раздача: " + error);
-            }
-        }
     }
 
     /// <summary>
@@ -384,7 +405,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         if (proxy is not null)
         {
             await proxy.DisposeAsync();
-            _main.AppendLog("Раздача: прокси остановлен");
+            Log("прокси остановлен");
         }
         await StopEngineAsync();
         Address = null;
@@ -396,7 +417,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         {
             _startedHotspot = false;
             await RunHotspotAsync(HotspotAction.Stop);
-            _main.AppendLog("Раздача: точка доступа выключена");
+            Log("точка доступа выключена");
         }
     }
 
@@ -481,5 +502,24 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
             {
             }
         }
+    }
+
+    /// <summary>
+    /// Строка в журнал на вкладке «Обход» и в share.log. С collapseRepeats (запросы устройств) повтор той же строки
+    /// чаще раза в минуту пропускается.
+    /// </summary>
+    private void Log(string text, bool warning = false, bool collapseRepeats = false)
+    {
+        if (_log.Write(warning ? "! " + text : text, collapseRepeats)) _main.AppendLog((warning ? "! " : "") + "Раздача: " + text);
+    }
+
+    public string LogFile => _log.FilePath;
+
+    [RelayCommand]
+    private void OpenLog()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        if (!File.Exists(_log.FilePath)) _log.Write("журнал раздачи создан");
+        Process.Start(new ProcessStartInfo("notepad.exe") { ArgumentList = { _log.FilePath } });
     }
 }
