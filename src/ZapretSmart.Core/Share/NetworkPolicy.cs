@@ -104,6 +104,9 @@ public static class NetworkPolicy
                 if (ip.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ip) || !IsLocalClient(ip)) continue;
                 var bytes = ip.GetAddressBytes();
                 if (bytes[0] == 169 && bytes[1] == 254) continue;
+                // Адрес в конфликте с другим устройством (Duplicate) или ещё не проверенный (Tentative) Windows держит
+                // на адаптере, но не использует: телефон по нему попал бы к чужому устройству или в пустоту.
+                if (OperatingSystem.IsWindows() && !IsUsable(ua.DuplicateAddressDetectionState)) continue;
                 var hotspot = ip.Equals(WindowsHotspotAddress);
                 var rank = Rank(hotspot, nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211);
                 found.Add((new LocalAddress(ip, nic.Name, hotspot), rank));
@@ -111,6 +114,10 @@ public static class NetworkPolicy
         }
         return found.OrderBy(f => f.Rank).Select(f => f.Address).ToList();
     }
+
+    /// <summary>Адрес, которым Windows пользуется: прошёл проверку на конфликт (Preferred) или устаревает, но ещё работает.</summary>
+    public static bool IsUsable(DuplicateAddressDetectionState state) =>
+        state is DuplicateAddressDetectionState.Preferred or DuplicateAddressDetectionState.Deprecated;
 
     private static bool IsVirtual(string name) =>
         new[] { "Hyper-V", "vEthernet", "VirtualBox", "VMware", "WSL", "Docker", "TAP-", "Wintun", "WireGuard", "ZeroTier", "Tailscale" }

@@ -437,6 +437,7 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.Contains("на 127.0.0.1 порт 8880 отвечает", filter[0]);
         Assert.Contains("192.168.31.40", filter[0]);
         Assert.Contains(filter, l => l.Contains("Kaspersky") && l.Contains("«Выход»"));
+        Assert.Contains(filter, l => l.Contains("Get-NetIPAddress -IPAddress 192.168.31.40") && l.Contains("Duplicate"));
 
         var dead = ShareReachProbe.Explain(Reach(self: false, loopback: false));
         Assert.Contains("ни на адресе в сети, ни на 127.0.0.1", dead[0]);
@@ -448,6 +449,15 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.Contains(syns, l => l.Contains("goodbyedpi.exe"));
         Assert.DoesNotContain(syns, l => l.Contains("групповая политика"));
     }
+
+    [Theory]
+    [InlineData(System.Net.NetworkInformation.DuplicateAddressDetectionState.Preferred, true)]
+    [InlineData(System.Net.NetworkInformation.DuplicateAddressDetectionState.Deprecated, true)]
+    [InlineData(System.Net.NetworkInformation.DuplicateAddressDetectionState.Duplicate, false)]
+    [InlineData(System.Net.NetworkInformation.DuplicateAddressDetectionState.Tentative, false)]
+    [InlineData(System.Net.NetworkInformation.DuplicateAddressDetectionState.Invalid, false)]
+    public void OnlyAddressesWindowsActuallyUsesAreOffered(System.Net.NetworkInformation.DuplicateAddressDetectionState state, bool usable) =>
+        Assert.Equal(usable, NetworkPolicy.IsUsable(state));
 
     [Fact]
     public void ForeignInterceptorsAreOtherDpiToolsOutsideOurEngineFolder()
