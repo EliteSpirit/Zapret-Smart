@@ -49,11 +49,17 @@ public static class ForwardProbe
     [return: MarshalAs(UnmanagedType.Bool)]
     private delegate bool CloseFn(IntPtr handle);
 
-    public static async Task<ForwardProbeResult> RunAsync(string winDivertDll, TimeSpan duration, CancellationToken ct)
-    {
-        if (!OperatingSystem.IsWindows()) return ForwardProbeResult.Failed("проверка работает только в Windows");
-        if (!File.Exists(winDivertDll)) return ForwardProbeResult.Failed("не найден " + winDivertDll);
+    /// <summary>Функции WinDivert.dll, загруженной на время одной проверки.</summary>
+    private sealed record Api(OpenFn Open, RecvFn Recv, ShutdownFn Shutdown, CloseFn Close);
 
+    /// <summary>
+    /// Загружает WinDivert.dll и выполняет body. Ошибка загрузки или отсутствующая функция возвращаются текстом:
+    /// проверка не должна ронять приложение.
+    /// </summary>
+    private static async Task<(T? Value, string? Error)> WithApiAsync<T>(string winDivertDll, Func<Api, Task<T>> body)
+    {
+        if (!OperatingSystem.IsWindows()) return (default, "проверка работает только в Windows");
+        if (!File.Exists(winDivertDll)) return (default, "не найден " + winDivertDll);
         IntPtr lib;
         try
         {
@@ -61,28 +67,44 @@ public static class ForwardProbe
         }
         catch (Exception e) when (e is DllNotFoundException or BadImageFormatException)
         {
-            return ForwardProbeResult.Failed("не удалось загрузить WinDivert: " + e.Message);
+            return (default, "не удалось загрузить WinDivert: " + e.Message);
         }
         try
         {
-            var open = Marshal.GetDelegateForFunctionPointer<OpenFn>(NativeLibrary.GetExport(lib, "WinDivertOpen"));
-            var recv = Marshal.GetDelegateForFunctionPointer<RecvFn>(NativeLibrary.GetExport(lib, "WinDivertRecv"));
-            var shutdown = Marshal.GetDelegateForFunctionPointer<ShutdownFn>(NativeLibrary.GetExport(lib, "WinDivertShutdown"));
-            var close = Marshal.GetDelegateForFunctionPointer<CloseFn>(NativeLibrary.GetExport(lib, "WinDivertClose"));
+            var api = new Api(
+                Marshal.GetDelegateForFunctionPointer<OpenFn>(NativeLibrary.GetExport(lib, "WinDivertOpen")),
+                Marshal.GetDelegateForFunctionPointer<RecvFn>(NativeLibrary.GetExport(lib, "WinDivertRecv")),
+                Marshal.GetDelegateForFunctionPointer<ShutdownFn>(NativeLibrary.GetExport(lib, "WinDivertShutdown")),
+                Marshal.GetDelegateForFunctionPointer<CloseFn>(NativeLibrary.GetExport(lib, "WinDivertClose")));
+            return (await body(api), null);
+        }
+        catch (EntryPointNotFoundException e)
+        {
+            return (default, "в WinDivert.dll нет нужной функции: " + e.Message);
+        }
+        finally
+        {
+            NativeLibrary.Free(lib);
+        }
+    }
 
-            var forward = open(ForwardFilter, LayerForward, 0, FlagSniff | FlagRecvOnly);
+    public static async Task<ForwardProbeResult> RunAsync(string winDivertDll, TimeSpan duration, CancellationToken ct)
+    {
+        var (result, error) = await WithApiAsync(winDivertDll, async api =>
+        {
+            var forward = api.Open(ForwardFilter, LayerForward, 0, FlagSniff | FlagRecvOnly);
             if (forward == new IntPtr(-1)) return ForwardProbeResult.Failed("WinDivert не открыл слой пересылки: код " + Marshal.GetLastWin32Error());
-            var inbound = open(InboundFilter, LayerNetwork, 0, FlagSniff | FlagRecvOnly);
+            var inbound = api.Open(InboundFilter, LayerNetwork, 0, FlagSniff | FlagRecvOnly);
             if (inbound == new IntPtr(-1))
             {
-                close(forward);
+                api.Close(forward);
                 return ForwardProbeResult.Failed("WinDivert не открыл входящий трафик: код " + Marshal.GetLastWin32Error());
             }
 
             var local = LocalIPv4();
             var samples = new List<string>();
-            var forwardCount = Listen(forward, recv, "пересылка", samples, _ => true);
-            var inboundCount = Listen(inbound, recv, "входящий", samples, dst => !local.Contains(dst));
+            var forwardCount = Listen(forward, api.Recv, "пересылка", samples, _ => true);
+            var inboundCount = Listen(inbound, api.Recv, "входящий", samples, dst => !local.Contains(dst));
             try
             {
                 await Task.Delay(duration, ct);
@@ -90,24 +112,54 @@ public static class ForwardProbe
             finally
             {
                 // После shutdown WinDivertRecv возвращает ошибку, и потоки чтения заканчиваются.
-                shutdown(forward, ShutdownBoth);
-                shutdown(inbound, ShutdownBoth);
+                api.Shutdown(forward, ShutdownBoth);
+                api.Shutdown(inbound, ShutdownBoth);
                 await Task.WhenAll(forwardCount, inboundCount);
-                close(forward);
-                close(inbound);
+                api.Close(forward);
+                api.Close(inbound);
             }
             List<string> copy;
             lock (samples) copy = [.. samples];
             return new ForwardProbeResult(forwardCount.Result, inboundCount.Result, copy, null);
-        }
-        catch (EntryPointNotFoundException e)
+        });
+        return error is null ? result! : ForwardProbeResult.Failed(error);
+    }
+
+    /// <summary>
+    /// Копии входящих пакетов слоя NETWORK по фильтру, пока не пройдёт duration или не отменят stop. Слой NETWORK
+    /// раньше брандмауэра Windows: пакет, который брандмауэр потом отбросит, здесь уже виден. onPacket вызывается
+    /// из фонового потока. Возвращает текст ошибки или null.
+    /// </summary>
+    public static async Task<string?> SniffAsync(string winDivertDll, string filter, TimeSpan duration, Action<ReadOnlyMemory<byte>> onPacket, CancellationToken stop)
+    {
+        var (inner, error) = await WithApiAsync<string?>(winDivertDll, async api =>
         {
-            return ForwardProbeResult.Failed("в WinDivert.dll нет нужной функции: " + e.Message);
-        }
-        finally
-        {
-            NativeLibrary.Free(lib);
-        }
+            var handle = api.Open(filter, LayerNetwork, 0, FlagSniff | FlagRecvOnly);
+            if (handle == new IntPtr(-1)) return "WinDivert не открыл перехват: код " + Marshal.GetLastWin32Error();
+            var reader = Task.Factory.StartNew(() =>
+            {
+                var packet = new byte[65535];
+                var address = new byte[AddressSize];
+                while (api.Recv(handle, packet, (uint)packet.Length, out var len, address))
+                    onPacket(packet.AsMemory(0, (int)len).ToArray());
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            try
+            {
+                await Task.Delay(duration, stop);
+            }
+            catch (OperationCanceledException)
+            {
+                // Остановили раньше: так и задумано, когда ответ уже получен.
+            }
+            finally
+            {
+                api.Shutdown(handle, ShutdownBoth);
+                await reader;
+                api.Close(handle);
+            }
+            return null;
+        });
+        return error ?? inner;
     }
 
     private static Task<int> Listen(IntPtr handle, RecvFn recv, string kind, List<string> samples, Func<IPAddress, bool> counts) =>

@@ -279,6 +279,72 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         }
     }
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CheckReachCommand))]
+    private bool _isCheckingReach;
+
+    [ObservableProperty] private string? _reachText;
+
+    private HashSet<IPAddress>? _reachConnected;
+    private CancellationTokenSource? _reachStop;
+
+    private bool CanCheckReach() => IsHotspotAvailable && !IsCheckingReach;
+
+    private bool IsOwnAddress(IPAddress ip) =>
+        NetworkPolicy.FindLocalAddresses().Any(a => a.Address.Equals(ip));
+
+    /// <summary>
+    /// «Почему телефон не достучался»: слушает ли прокси, доходят ли до ПК попытки подключения, пускает ли их
+    /// брандмауэр. Итог в карточке и в журнале раздачи. Прерывается раньше, как только телефон дошёл до прокси.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanCheckReach))]
+    private async Task CheckReach()
+    {
+        if (_proxy is null || Address is null || !IPAddress.TryParse(Address, out var address))
+        {
+            ReachText = "Сначала включите раздачу: проверять нечего, пока прокси не запущен и у ПК нет адреса в сети.";
+            return;
+        }
+        IsCheckingReach = true;
+        var port = Port;
+        var seconds = (int)ShareReachProbe.Duration.TotalSeconds;
+        ReachText = $"Проверяю до {seconds} секунд. Сейчас откройте на телефоне http://{Address}:{port}/proxy.pac (телефон в той же сети Wi-Fi).";
+        Log($"проверка связи: жду подключения к {Address}:{port} до {seconds} с");
+        var syns = new System.Collections.Concurrent.ConcurrentDictionary<IPAddress, int>();
+        _reachConnected = [];
+        using var stop = new CancellationTokenSource();
+        _reachStop = stop;
+        try
+        {
+            var self = await ShareReachProbe.SelfConnectsAsync(address, port, CancellationToken.None);
+            Log(self ? "проверка связи: с самого ПК порт отвечает" : "проверка связи: порт не отвечает даже с самого ПК", warning: !self);
+            var firewall = await ShareReachProbe.ReadFirewallAsync(CancellationToken.None);
+            if (firewall.BlocksAllInbound) Log("проверка связи: в брандмауэре Windows включено «Блокировать все входящие подключения»", warning: true);
+            if (firewall.ThirdParty.Count > 0) Log("проверка связи: сторонний брандмауэр: " + string.Join(", ", firewall.ThirdParty));
+
+            string? sniffError = null;
+            if (self)
+            {
+                var dll = Path.Combine(Path.GetDirectoryName(_main.Paths.EngineExe)!, "WinDivert.dll");
+                sniffError = await ForwardProbe.SniffAsync(dll, ShareReachProbe.SynFilter(port), ShareReachProbe.Duration, packet =>
+                {
+                    if (ShareReachProbe.SynSource(packet.Span) is { } source) syns.AddOrUpdate(source, 1, (_, n) => n + 1);
+                }, stop.Token);
+            }
+            var report = new ReachReport(port, Address, ShareReachProbe.Duration, self, firewall,
+                new Dictionary<IPAddress, int>(syns), [.. _reachConnected], sniffError);
+            var lines = ShareReachProbe.Explain(report);
+            ReachText = string.Join("\n", lines);
+            foreach (var line in lines) Log("проверка связи: " + line);
+        }
+        finally
+        {
+            _reachConnected = null;
+            _reachStop = null;
+            IsCheckingReach = false;
+        }
+    }
+
     public string HotspotText => Hotspot switch
     {
         null => "Если общего Wi-Fi нет (например, ПК подключён кабелем к модему), ПК может сам стать сетью Wi-Fi.",
@@ -389,6 +455,11 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         {
             LastClient = $"Последнее подключение: {ip} в {DateTime.Now:HH:mm}";
             if (_seenClients.Add(ip)) Log($"подключилось устройство {ip}");
+            if (_reachConnected is { } reached && !IPAddress.IsLoopback(ip) && !IsOwnAddress(ip))
+            {
+                reached.Add(ip);
+                _reachStop?.Cancel();
+            }
         });
         proxy.ClientRejected += ip => Dispatcher.UIThread.Post(() =>
         {

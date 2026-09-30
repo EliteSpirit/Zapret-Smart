@@ -661,6 +661,12 @@
                                 ToolTip.Tip="Что просил телефон и чем кончилось. Этот файл пригодится, если телефон не подключается." />
                         <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding LogFile}" TextTrimming="CharacterEllipsis" />
                       </StackPanel>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Classes="small" Content="Проверить связь с телефоном" Command="{Binding CheckReachCommand}"
+                                ToolTip.Tip="Минуту слушает порт прокси и говорит, где рвётся связь: прокси, брандмауэр на ПК или сеть." />
+                      </StackPanel>
+                      <TextBlock Text="{Binding ReachText}" TextWrapping="Wrap" Foreground="{DynamicResource ZsText}"
+                                 IsVisible="{Binding ReachText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     </StackPanel>
                   </Border>
 
