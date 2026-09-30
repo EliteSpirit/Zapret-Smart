@@ -141,6 +141,9 @@ public static class WindowsHotspot
         """;
 }
 
+/// <summary>Итог установки правила. RemovedProgramRules — сколько прежних входящих правил для программы снято.</summary>
+public sealed record FirewallResult(string? Error, int RemovedProgramRules);
+
 /// <summary>
 /// Правило брандмауэра Windows для прокси: входящие на порт прокси только из локальной подсети и только
 /// для ZapretSmart.exe. Без него телефон не достучится до ПК, если сеть в Windows помечена как общедоступная.
@@ -167,14 +170,25 @@ public static class ShareFirewall
 
     /// <summary>
     /// Ставит правило заново: старое (со старым портом или путём) и чужие входящие правила для этой программы
-    /// удаляются. Вызывать до открытия порта, иначе Windows успеет показать свой вопрос. Возвращает текст ошибки или null.
+    /// удаляются. Вызывать до открытия порта, иначе Windows успеет показать свой вопрос.
     /// </summary>
-    public static async Task<string?> AllowAsync(string program, int port, CancellationToken ct)
+    public static async Task<FirewallResult> AllowAsync(string program, int port, CancellationToken ct)
     {
         await RunAsync(DeleteArguments, ct);
-        await RunAsync(DeleteProgramArguments(program), ct);
+        var (deleted, deleteOutput) = await RunAsync(DeleteProgramArguments(program), ct);
+        var removed = deleted == 0 ? CountDeleted(deleteOutput) : 0;
         var (code, output) = await RunAsync(AddArguments(program, port), ct);
-        return code == 0 ? null : "не удалось открыть порт в брандмауэре: " + output.Trim();
+        return new FirewallResult(code == 0 ? null : "не удалось открыть порт в брандмауэре: " + output.Trim(), removed);
+    }
+
+    /// <summary>
+    /// Число удалённых правил из ответа netsh («Deleted 2 rule(s).», «Удалено правил: 2.»). Код 0 без числа
+    /// значит, что удалено хотя бы одно.
+    /// </summary>
+    public static int CountDeleted(string output)
+    {
+        var digits = new string(output.SkipWhile(c => !char.IsAsciiDigit(c)).TakeWhile(char.IsAsciiDigit).ToArray());
+        return int.TryParse(digits, out var n) ? n : 1;
     }
 
     public static async Task RemoveAsync(CancellationToken ct) => await RunAsync(DeleteArguments, ct);

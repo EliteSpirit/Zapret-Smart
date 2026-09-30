@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -71,6 +72,15 @@ public sealed class ShareProxy : IAsyncDisposable
     /// </summary>
     public event Action? OutboundPortsExhausted;
 
+    /// <summary>
+    /// Строка для журнала раздачи: что просило устройство и чем кончилось. Удачные соединения сообщаются один раз
+    /// на пару «устройство, сервер», чтобы журнал не утонул. Вызывается из фонового потока.
+    /// </summary>
+    public event Action<IPAddress, string>? Logged;
+
+    private const int MaxReportedTargets = 500;
+    private readonly ConcurrentDictionary<string, byte> _reportedTargets = new();
+
     public void Start()
     {
         if (_listener is not null) throw new InvalidOperationException("прокси уже запущен");
@@ -127,11 +137,11 @@ public sealed class ShareProxy : IAsyncDisposable
                 continue;
             }
             ClientConnected?.Invoke(remote);
-            _ = ServeAsync(client, ct);
+            _ = ServeAsync(client, remote, ct);
         }
     }
 
-    private async Task ServeAsync(Socket client, CancellationToken ct)
+    private async Task ServeAsync(Socket client, IPAddress remote, CancellationToken ct)
     {
         Interlocked.Increment(ref _active);
         Socket? upstream = null;
@@ -140,9 +150,19 @@ public sealed class ShareProxy : IAsyncDisposable
             client.NoDelay = true;
             using var headerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             headerCts.CancelAfter(_options.HeaderTimeout);
-            var head = await ReadHeadAsync(client, headerCts.Token);
+            (string Head, byte[] Early)? head;
+            try
+            {
+                head = await ReadHeadAsync(client, headerCts.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                Log(remote, $"не прислал запрос за {_options.HeaderTimeout.TotalSeconds:0} с, соединение закрыто");
+                return;
+            }
             if (head is null)
             {
+                Log(remote, "слишком большой заголовок запроса, отказ");
                 await ReplyAsync(client, 431, "Request Header Fields Too Large", ct);
                 return;
             }
@@ -150,13 +170,14 @@ public sealed class ShareProxy : IAsyncDisposable
             var request = ProxyRequest.Parse(head.Value.Head);
             if (request is null)
             {
+                Log(remote, "непонятный запрос: это не HTTP-прокси запрос");
                 await ReplyAsync(client, 400, "Bad Request", ct);
                 return;
             }
 
             if (request.Method == "GET" && request.Target.StartsWith('/'))
             {
-                await ServeLocalAsync(client, request, ct);
+                await ServeLocalAsync(client, remote, request, ct);
                 return;
             }
 
@@ -166,6 +187,7 @@ public sealed class ShareProxy : IAsyncDisposable
             {
                 if (!TrySplitHostPort(request.Target, 443, out host, out port))
                 {
+                    Log(remote, $"непонятный адрес в CONNECT: {Clean(request.Target)}");
                     await ReplyAsync(client, 400, "Bad Request", ct);
                     return;
                 }
@@ -177,12 +199,15 @@ public sealed class ShareProxy : IAsyncDisposable
             }
             else
             {
+                Log(remote, $"запрос {Clean(request.Method)} не к http-адресу, отказ");
                 await ReplyAsync(client, 400, "Bad Request", ct);
                 return;
             }
 
+            var target = $"{Clean(host)}:{port}";
             if (NetworkPolicy.BlockedPorts.Contains(port) || port == Port || port is <= 0 or > 65535)
             {
+                Log(remote, $"{target}: порт запрещён (почта или сам прокси)");
                 await ReplyAsync(client, 403, "Forbidden", ct);
                 return;
             }
@@ -194,12 +219,14 @@ public sealed class ShareProxy : IAsyncDisposable
             }
             catch (SocketException)
             {
+                Log(remote, $"{target}: имя не найдено в DNS");
                 await ReplyAsync(client, 502, "Bad Gateway", ct);
                 return;
             }
             var allowed = addresses.Where(_options.AllowDestination).ToArray();
             if (allowed.Length == 0)
             {
+                Log(remote, addresses.Length == 0 ? $"{target}: имя не найдено в DNS" : $"{target}: адрес внутри ПК или сети, отказ");
                 await ReplyAsync(client, addresses.Length == 0 ? 502 : 403, addresses.Length == 0 ? "Bad Gateway" : "Forbidden", ct);
                 return;
             }
@@ -207,9 +234,12 @@ public sealed class ShareProxy : IAsyncDisposable
             upstream = await ConnectAsync(allowed, port, ct);
             if (upstream is null)
             {
+                Log(remote, $"{target}: сервер не отвечает");
                 await ReplyAsync(client, 502, "Bad Gateway", ct);
                 return;
             }
+            if (_reportedTargets.Count < MaxReportedTargets && _reportedTargets.TryAdd($"{remote} {target}", 0))
+                Log(remote, $"открыл {target}");
 
             if (request.Method == "CONNECT")
             {
@@ -256,16 +286,17 @@ public sealed class ShareProxy : IAsyncDisposable
         }
     }
 
-    private async Task ServeLocalAsync(Socket client, ProxyRequest request, CancellationToken ct)
+    private async Task ServeLocalAsync(Socket client, IPAddress remote, ProxyRequest request, CancellationToken ct)
     {
         var path = request.Target.Split('?', 2)[0];
         if (path is "/i" or "/iphone.mobileconfig")
         {
-            await ServeProfileAsync(client, ct);
+            await ServeProfileAsync(client, remote, ct);
             return;
         }
         if (path != "/proxy.pac")
         {
+            Log(remote, $"открыл адрес {Clean(path)}, такого нет (профиль iPhone: /i, автонастройка: /proxy.pac)");
             await ReplyAsync(client, 404, "Not Found", ct,
                 "Zapret Smart: это прокси. Укажите этот адрес в настройках прокси телефона или файл автонастройки /proxy.pac.");
             return;
@@ -278,18 +309,20 @@ public sealed class ShareProxy : IAsyncDisposable
             + $"Content-Length: {bytes.Length}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
         await client.SendAsync(Encoding.ASCII.GetBytes(headers), SocketFlags.None, ct);
         await client.SendAsync(bytes, SocketFlags.None, ct);
+        Log(remote, "забрал файл автонастройки proxy.pac");
     }
 
     /// <summary>
     /// Профиль iPhone: сеть точки доступа ПК с паролем и прокси. После установки iPhone сам подключается к этой сети
     /// уже с прокси. Пароль точки доступа отдаётся только клиентам из локальной сети (их пропускает AllowClient).
     /// </summary>
-    private async Task ServeProfileAsync(Socket client, CancellationToken ct)
+    private async Task ServeProfileAsync(Socket client, IPAddress remote, CancellationToken ct)
     {
         if (_options.Wifi() is not { } wifi)
         {
+            Log(remote, "просил профиль iPhone, но имя сети Wi-Fi не задано");
             await ReplyAsync(client, 404, "Not Found", ct,
-                "Zapret Smart: точка доступа ПК выключена. Включите раздачу в приложении и откройте этот адрес снова.");
+                "Zapret Smart: имя сети Wi-Fi неизвестно. Введите его в карточке раздачи в приложении и откройте этот адрес снова.");
             return;
         }
         var bytes = Encoding.UTF8.GetBytes(IphoneProfile.Build(wifi, Port));
@@ -298,6 +331,16 @@ public sealed class ShareProxy : IAsyncDisposable
             + $"Content-Length: {bytes.Length}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
         await client.SendAsync(Encoding.ASCII.GetBytes(headers), SocketFlags.None, ct);
         await client.SendAsync(bytes, SocketFlags.None, ct);
+        Log(remote, $"забрал профиль iPhone для сети «{Clean(wifi.Ssid)}»");
+    }
+
+    private void Log(IPAddress remote, string text) => Logged?.Invoke(remote, text);
+
+    /// <summary>То, что прислало устройство, в журнал попадает коротким и без управляющих символов.</summary>
+    internal static string Clean(string text)
+    {
+        var chars = text.Where(c => !char.IsControl(c)).Take(80).ToArray();
+        return new string(chars) + (text.Length > 80 ? "…" : "");
     }
 
     /// <summary>
