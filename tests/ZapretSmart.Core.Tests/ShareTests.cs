@@ -422,15 +422,60 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.Equal(blocks, ShareReachProbe.BlocksAllInbound(output));
 
     private static ReachReport Reach(bool self = true, FirewallState? firewall = null, Dictionary<IPAddress, int>? syns = null,
-        IPAddress[]? connected = null, string? sniffError = null) =>
-        new(8880, "192.168.31.40", TimeSpan.FromSeconds(60), self, firewall ?? FirewallState.Unknown,
+        IPAddress[]? connected = null, string? sniffError = null, bool loopback = true, string[]? interceptors = null) =>
+        new(8880, "192.168.31.40", TimeSpan.FromSeconds(60), self, loopback, interceptors ?? [], firewall ?? FirewallState.Unknown,
             syns ?? [], connected ?? [], sniffError);
+
+    /// <summary>
+    /// Случай пользователя: прокси слушает, а подключение к своему адресу в сети пропадает. Kaspersky был на паузе и
+    /// оказался ни при чём, поэтому вывод различает «прокси не принимает» и «режет фильтр», а чужой WinDivert называет первым.
+    /// </summary>
+    [Fact]
+    public void ReachVerdictSeparatesADeadProxyFromAFilterAndNamesForeignInterceptors()
+    {
+        var filter = ShareReachProbe.Explain(Reach(self: false, firewall: new FirewallState(false, ["Kaspersky"])));
+        Assert.Contains("на 127.0.0.1 порт 8880 отвечает", filter[0]);
+        Assert.Contains("192.168.31.40", filter[0]);
+        Assert.Contains(filter, l => l.Contains("Kaspersky") && l.Contains("«Выход»"));
+
+        var dead = ShareReachProbe.Explain(Reach(self: false, loopback: false));
+        Assert.Contains("ни на адресе в сети, ни на 127.0.0.1", dead[0]);
+
+        var other = ShareReachProbe.Explain(Reach(self: false, interceptors: ["winws.exe (PID 42)"]));
+        Assert.Contains("другой перехватчик пакетов: winws.exe (PID 42)", other[0]);
+
+        var syns = ShareReachProbe.Explain(Reach(syns: new() { [IPAddress.Parse("192.168.31.77")] = 1 }, interceptors: ["goodbyedpi.exe (PID 7)"]));
+        Assert.Contains(syns, l => l.Contains("goodbyedpi.exe"));
+        Assert.DoesNotContain(syns, l => l.Contains("групповая политика"));
+    }
+
+    [Fact]
+    public void ForeignInterceptorsAreOtherDpiToolsOutsideOurEngineFolder()
+    {
+        var own = OperatingSystem.IsWindows() ? @"C:\Apps\ZapretSmart\engine" : "/apps/zs/engine";
+        var ours = OperatingSystem.IsWindows() ? @"C:\Apps\ZapretSmart\engine\winws.exe" : "/apps/zs/engine/winws";
+        var theirs = OperatingSystem.IsWindows() ? @"C:\zapret-discord-youtube\bin\winws.exe" : "/opt/zapret/winws";
+        var found = ShareReachProbe.ForeignInterceptors(
+            [("winws", ours, 1), ("winws", theirs, 2), ("GoodbyeDPI", null, 3), ("chrome", "/x/chrome", 4)], own);
+        Assert.Equal(2, found.Count);
+        Assert.Contains(found, f => f.StartsWith("winws.exe (PID 2"));
+        Assert.Contains(found, f => f == "GoodbyeDPI.exe (PID 3)");
+    }
+
+    [Fact]
+    public void ShareLogHidesTheUserProfileFolder()
+    {
+        Assert.Equal(@"--hostlist=%USERPROFILE%\AppData\Roaming\ZapretSmart\lists\blocked.txt",
+            ShareLog.Redact(@"--hostlist=C:\Users\artem\AppData\Roaming\ZapretSmart\lists\blocked.txt", @"C:\Users\artem"));
+        Assert.Equal("x %USERPROFILE%\\a", ShareLog.Redact(@"x c:\users\ARTEM\a", @"C:\Users\artem\"));
+        Assert.Equal("без путей", ShareLog.Redact("без путей", @"C:\Users\artem"));
+    }
 
     [Fact]
     public void ReachVerdictNamesTheBrokenLeg()
     {
         var phone = IPAddress.Parse("192.168.31.77");
-        Assert.Contains("не отвечает даже с самого ПК", ShareReachProbe.Explain(Reach(self: false))[0]);
+        Assert.Contains("пропадают даже с самого ПК", ShareReachProbe.Explain(Reach(self: false))[0]);
         Assert.Contains("Связь в порядке: 192.168.31.77", ShareReachProbe.Explain(Reach(connected: [phone]))[0]);
 
         var nothing = ShareReachProbe.Explain(Reach());

@@ -16,6 +16,8 @@ public sealed record FirewallState(bool BlocksAllInbound, IReadOnlyList<string> 
 
 /// <summary>Что выяснила проверка связи с телефоном.</summary>
 /// <param name="SelfConnects">Порт прокси отвечает при подключении с самого ПК на его адрес в сети.</param>
+/// <param name="LoopbackConnects">Порт прокси отвечает на 127.0.0.1: прокси принимает подключения вообще.</param>
+/// <param name="Interceptors">Чужие программы с WinDivert (другой zapret, GoodbyeDPI): они перехватывают пакеты раньше нас.</param>
 /// <param name="Syns">Кто и сколько раз пытался подключиться к порту прокси (TCP SYN на входе в Windows).</param>
 /// <param name="Connected">Кто из чужих адресов дошёл до прокси.</param>
 public sealed record ReachReport(
@@ -23,6 +25,8 @@ public sealed record ReachReport(
     string? Address,
     TimeSpan Duration,
     bool SelfConnects,
+    bool LoopbackConnects,
+    IReadOnlyList<string> Interceptors,
     FirewallState Firewall,
     IReadOnlyDictionary<IPAddress, int> Syns,
     IReadOnlyCollection<IPAddress> Connected,
@@ -79,6 +83,43 @@ public static class ShareReachProbe
         return new FirewallState(BlocksAllInbound(netsh.Output), thirdParty);
     }
 
+    /// <summary>Имена программ, которые ставят свой WinDivert и перехватывают пакеты: разные сборки zapret и GoodbyeDPI.</summary>
+    private static readonly string[] InterceptorNames = ["winws", "goodbyedpi", "zapret", "nfqws", "ciadpi", "byedpi"];
+
+    /// <summary>Чужие перехватчики среди процессов: по имени, но не из нашей папки движка.</summary>
+    public static IReadOnlyList<string> ForeignInterceptors(IEnumerable<(string Name, string? Path, int Pid)> processes, string ownEngineDir)
+    {
+        var own = System.IO.Path.GetFullPath(ownEngineDir).TrimEnd('\\', '/') + System.IO.Path.DirectorySeparatorChar;
+        return processes
+            .Where(p => InterceptorNames.Contains(p.Name, StringComparer.OrdinalIgnoreCase))
+            .Where(p => p.Path is null || !p.Path.StartsWith(own, StringComparison.OrdinalIgnoreCase))
+            .Select(p => $"{p.Name}.exe (PID {p.Pid}{(p.Path is null ? "" : ", " + ShareLog.Redact(p.Path))})")
+            .ToList();
+    }
+
+    /// <summary>Чужие перехватчики среди запущенных процессов.</summary>
+    public static IReadOnlyList<string> ForeignInterceptors(string ownEngineDir)
+    {
+        var found = new List<(string, string?, int)>();
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                if (!InterceptorNames.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase)) continue;
+                string? path = null;
+                try
+                {
+                    path = process.MainModule?.FileName;
+                }
+                catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
+                {
+                }
+                found.Add((process.ProcessName, path, process.Id));
+            }
+        }
+        return ForeignInterceptors(found, ownEngineDir);
+    }
+
     /// <summary>Подключается к порту прокси с самого ПК. Такой трафик брандмауэр не фильтрует: проверяется только, слушает ли прокси.</summary>
     public static async Task<bool> SelfConnectsAsync(IPAddress address, int port, CancellationToken ct)
     {
@@ -103,11 +144,26 @@ public static class ShareReachProbe
         var third = r.Firewall.ThirdParty.Count > 0 ? string.Join(", ", r.Firewall.ThirdParty) : null;
         var seconds = (int)r.Duration.TotalSeconds;
 
+        var interceptors = r.Interceptors.Count > 0 ? string.Join(", ", r.Interceptors) : null;
         if (!r.SelfConnects)
         {
-            lines.Add($"Порт {r.Port} не отвечает даже с самого ПК: прокси не слушает, или его соединения перехватывает антивирус.");
-            lines.Add("Выключите и включите раздачу и посмотрите журнал раздачи: там будет, на каком шаге запуск остановился.");
-            if (third is not null) lines.Add($"Установлен {third}: на время проверки отключите его сетевой экран.");
+            if (interceptors is not null)
+            {
+                lines.Add($"Порт {r.Port} не отвечает даже с самого ПК, а на ПК работает другой перехватчик пакетов: {interceptors}. Его WinDivert забирает подключения к прокси раньше, чем они до него доходят.");
+                lines.Add("Закройте эту программу (или остановите её службу) и повторите проверку. Обход ПК уже делает Zapret Smart, второй не нужен.");
+            }
+            else if (r.LoopbackConnects)
+            {
+                lines.Add($"Прокси работает: на 127.0.0.1 порт {r.Port} отвечает. Но подключения на адрес ПК в сети ({r.Address}) пропадают даже с самого ПК: их режет сетевой фильтр на ПК.");
+                lines.Add("Так делают антивирусы, VPN-клиенты и программы контроля трафика. Закройте их по очереди полностью (не пауза, а выход из программы) и повторяйте проверку.");
+            }
+            else
+            {
+                lines.Add($"Порт {r.Port} не отвечает ни на адресе в сети, ни на 127.0.0.1: прокси не принимает подключения.");
+                lines.Add("Выключите и включите раздачу и пришлите журнал раздачи.");
+            }
+            if (third is not null)
+                lines.Add($"Установлен {third}. Пауза защиты не всегда выгружает его сетевой драйвер: чтобы исключить его, выйдите из него полностью (значок в трее, «Выход»).");
             return lines;
         }
 
@@ -129,7 +185,8 @@ public static class ShareReachProbe
             var from = string.Join(", ", r.Syns.Select(p => $"{p.Key} ({p.Value})"));
             lines.Add($"Подключения доходят до ПК, но не до приложения: их отбрасывает брандмауэр на ПК. Пытались подключиться: {from}.");
             AddFirewallHints(lines, r, third);
-            if (!r.Firewall.BlocksAllInbound && third is null)
+            if (interceptors is not null) lines.Add($"Ещё на ПК работает другой перехватчик пакетов: {interceptors}. Закройте его и повторите проверку.");
+            if (!r.Firewall.BlocksAllInbound && third is null && interceptors is null)
                 lines.Add("Разрешающее правило стоит, запретов Windows нет. Остаются групповая политика брандмауэра или сетевой фильтр, который не регистрируется в Windows (некоторые VPN и антивирусы).");
             return lines;
         }
