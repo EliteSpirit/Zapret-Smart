@@ -45,6 +45,9 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         if (enabled) _ = StartSafelyAsync();
     }
 
+    /// <summary>Модель окна: карточка раздачи показывает галки автозапуска, которые хранит она.</summary>
+    public MainWindowViewModel Main => _main;
+
     public bool IsHotspotAvailable => OperatingSystem.IsWindows();
 
     /// <summary>Движок раздачи запускается, если он есть: в поставке это только Windows-сборка.</summary>

@@ -47,6 +47,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _communityEnabled = _settings.CommunityEnabled;
         _watchdogEnabled = _settings.WatchdogEnabled;
         _closeToTray = _settings.CloseToTray;
+        _shareAutoStart = _settings.ShareAutoStart;
         _theme = AppTheme.Find(_settings.ThemeId);
         _animatedBackdrop = _settings.AnimatedBackdrop;
         _menuOnTop = _settings.MenuOnTop;
@@ -76,7 +77,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _settings.HostsEnabled);
         Updates = new UpdatesViewModel(this, http);
         Search = new SearchViewModel(this);
-        Share = new ShareViewModel(this, _settings.SharePort, paths.ManageSystem, _settings.ShareEnabled);
+        Share = new ShareViewModel(this, _settings.SharePort, paths.ManageSystem, _settings.ShareEnabled || _settings.ShareAutoStart);
 
         ReloadStrategies();
         UpdateStatus();
@@ -194,6 +195,73 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnCloseToTrayChanged(bool value) => SaveSettings(_settings with { CloseToTray = value });
 
+    /// <summary>Включать раздачу при каждом запуске программы.</summary>
+    [ObservableProperty] private bool _shareAutoStart;
+
+    partial void OnShareAutoStartChanged(bool value) => SaveSettings(_settings with { ShareAutoStart = value });
+
+    /// <summary>
+    /// Запуск вместе с Windows (задача Планировщика). Значение берётся из самого Планировщика, а не из настроек:
+    /// задачу могли удалить руками. Меняется только в настоящем приложении на Windows.
+    /// </summary>
+    [ObservableProperty] private bool _startWithWindows;
+
+    [ObservableProperty] private string? _autostartStatus;
+
+    public bool CanStartWithWindows => Paths.ManageSystem;
+
+    private bool _syncingAutostart;
+
+    /// <summary>
+    /// Читает задачу автозапуска. Если программу перенесли в другую папку, задача перенастраивается на новый путь:
+    /// иначе при входе запускалась бы старая копия или ничего.
+    /// </summary>
+    public async Task SyncAutostartAsync()
+    {
+        if (!Paths.ManageSystem || Environment.ProcessPath is not { } exe) return;
+        var command = await WindowsAutostart.QueryAsync(CancellationToken.None);
+        _syncingAutostart = true;
+        StartWithWindows = command is not null;
+        _syncingAutostart = false;
+        if (command is not null && !string.Equals(Path.GetFullPath(command), Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase))
+        {
+            var error = await WindowsAutostart.EnableAsync(exe, CancellationToken.None);
+            AppendLog(error is null ? "Автозапуск: задача перенастроена на " + Path.GetFileName(exe) + " в новой папке" : "! Автозапуск: " + error);
+        }
+    }
+
+    partial void OnStartWithWindowsChanged(bool value)
+    {
+        if (_syncingAutostart || !Paths.ManageSystem) return;
+        _ = ApplyAutostartAsync(value);
+    }
+
+    private async Task ApplyAutostartAsync(bool value)
+    {
+        string? error;
+        try
+        {
+            error = value
+                ? Environment.ProcessPath is { } exe ? await WindowsAutostart.EnableAsync(exe, CancellationToken.None) : "не удалось узнать путь к программе"
+                : await WindowsAutostart.DisableAsync(CancellationToken.None);
+        }
+        catch (Exception e)
+        {
+            error = e.Message;
+        }
+        AutostartStatus = error;
+        if (error is null)
+        {
+            AppendLog(value ? "Автозапуск включён: Zapret Smart запустится при входе в Windows свёрнутым в трей" : "Автозапуск выключен");
+            return;
+        }
+        AppendLog("! Автозапуск: " + error);
+        // Не вышло: галка возвращается к тому, что на самом деле в Планировщике.
+        _syncingAutostart = true;
+        StartWithWindows = !value;
+        _syncingAutostart = false;
+    }
+
     partial void OnWatchdogEnabledChanged(bool value)
     {
         SaveSettings(_settings with { WatchdogEnabled = value });
@@ -306,9 +374,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { ListStore.Directory } });
     }
 
+    private bool _autostartSynced;
+
     /// <summary>Фоновые задачи после показа окна. Не из конструктора: тесты создают модель без сети.</summary>
     public void StartBackgroundWork()
     {
+        if (!_autostartSynced)
+        {
+            _autostartSynced = true;
+            _ = SyncAutostartAsync();
+        }
         _ = Blocklists.UpdateStaleAsync();
         _ = Hosts.RefreshIfEnabledAsync();
     }

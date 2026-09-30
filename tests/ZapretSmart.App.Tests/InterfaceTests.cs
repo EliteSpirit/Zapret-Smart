@@ -312,6 +312,50 @@ public sealed class InterfaceTests : IDisposable
         return sb.ToString();
     }
 
+    /// <summary>
+    /// «Включать раздачу при запуске программы» включает её, даже если в прошлый раз её выключили, и сохраняется.
+    /// Автозапуск с Windows в тестах недоступен (не настоящее приложение) и ничего не меняет.
+    /// </summary>
+    [AvaloniaFact]
+    public void ShareCanBeTurnedOnAtEveryLaunch()
+    {
+        Directory.CreateDirectory(_data);
+        var store = new ZapretSmart.Core.Settings.SettingsStore(Path.Combine(_data, "settings.json"));
+        store.Save(new ZapretSmart.Core.Settings.AppSettings { SharePort = 0 });
+        using (var vm = CreateVm())
+        {
+            Assert.False(vm.Share.IsEnabled);
+            vm.ShareAutoStart = true;
+            Assert.False(vm.CanStartWithWindows);
+            vm.StartWithWindows = true;
+            Assert.Null(vm.AutostartStatus);
+        }
+        Assert.True(store.Load().ShareAutoStart);
+        Assert.False(store.Load().ShareEnabled);
+        using (var again = CreateVm())
+        {
+            Assert.True(again.ShareAutoStart);
+            Assert.True(again.Share.IsEnabled);
+            again.Share.IsEnabled = false;
+        }
+    }
+
+    /// <summary>
+    /// При автозапуске окно не показывается. «Выход» в трее закрывает окно: это должно сработать и у окна, которое
+    /// ни разу не показывали, иначе программа не выйдет вовсе.
+    /// </summary>
+    [AvaloniaFact]
+    public void AWindowThatWasNeverShownStillClosesForExit()
+    {
+        using var vm = CreateVm();
+        var w = new MainWindow { DataContext = vm, ExitRequested = true };
+        var closed = false;
+        w.Closed += (_, _) => closed = true;
+        w.Close();
+        Pump();
+        Assert.True(closed);
+    }
+
     [AvaloniaFact]
     public void MenuOnTopPutsTabsInARowAndIsRemembered()
     {

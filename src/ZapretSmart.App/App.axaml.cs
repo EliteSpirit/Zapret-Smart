@@ -29,11 +29,23 @@ public partial class App : Application
         {
             var vm = new MainWindowViewModel(AppPaths.Default);
             var window = new MainWindow { DataContext = vm };
-            desktop.MainWindow = window;
+            // Запуск Планировщиком при входе в Windows: окно не показывается, программа сразу в трее. Без главного
+            // окна среда его сама не покажет; открыть можно из трея.
+            var hidden = desktop.Args?.Contains(Core.Settings.WindowsAutostart.Argument, StringComparer.OrdinalIgnoreCase) == true;
+            if (!hidden) desktop.MainWindow = window;
+            // Окно, которое ни разу не показывали, закрывать не нужно: выход тогда завершает программу напрямую.
+            var everShown = !hidden;
+            window.Opened += (_, _) => everShown = true;
+            void Exit()
+            {
+                window.ExitRequested = true;
+                if (everShown) window.Close();
+                else desktop.Shutdown();
+            }
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             desktop.Exit += (_, _) => vm.Dispose();
 
-            SetUpTray(desktop, window, vm);
+            SetUpTray(window, vm, Exit);
 
             // Закрытие окна при работающем обходе или раздаче прячет его в трей: они продолжают работать.
             window.Closing += (_, e) =>
@@ -46,11 +58,7 @@ public partial class App : Application
             };
             window.Closed += (_, _) => desktop.Shutdown();
             // Установка другой версии: закрыться по-настоящему, не в трей, чтобы скрипт смог заменить файлы.
-            vm.ExitForUpdateRequested += () =>
-            {
-                window.ExitRequested = true;
-                window.Close();
-            };
+            vm.ExitForUpdateRequested += Exit;
 
             vm.StartBackgroundWork();
             // Обновляются только списки старше суток, так что частый таймер не создаёт лишних загрузок.
@@ -60,7 +68,7 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private static void SetUpTray(IClassicDesktopStyleApplicationLifetime desktop, MainWindow window, MainWindowViewModel vm)
+    private static void SetUpTray(MainWindow window, MainWindowViewModel vm, Action exitApp)
     {
         var on = LoadIcon("tray-on.png");
         var off = LoadIcon("tray-off.png");
@@ -74,11 +82,7 @@ public partial class App : Application
         var show = new NativeMenuItem("Показать");
         show.Click += (_, _) => ShowWindow(window);
         var exit = new NativeMenuItem("Выход");
-        exit.Click += (_, _) =>
-        {
-            window.ExitRequested = true;
-            window.Close();
-        };
+        exit.Click += (_, _) => exitApp();
 
         var tray = new TrayIcon
         {
