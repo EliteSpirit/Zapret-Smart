@@ -351,6 +351,51 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         }
     }
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(FindConflictsCommand))]
+    private bool _isFindingConflicts;
+
+    [ObservableProperty] private string? _conflictText;
+
+    private bool CanFindConflicts() => IsHotspotAvailable && !IsFindingConflicts;
+
+    /// <summary>
+    /// «Найти мешающие программы»: тестовое подключение к своему порту, журнал аудита WFP, фильтры WFP и процессы,
+    /// сверенные со списком известных файрволов, антивирусов и VPN. Работает и без включённой раздачи: порт свой.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanFindConflicts))]
+    private async Task FindConflicts()
+    {
+        IPAddress? address = Address is { } a && IPAddress.TryParse(a, out var parsed) ? parsed : NetworkPolicy.FindLocalAddresses().FirstOrDefault()?.Address;
+        if (address is null)
+        {
+            ConflictText = "У ПК нет адреса в локальной сети: подключите его к роутеру и повторите.";
+            return;
+        }
+        IsFindingConflicts = true;
+        ConflictText = "Ищу. Это до минуты: выгрузка фильтров Windows идёт долго.";
+        Log($"поиск мешающих программ: проверяю {address}");
+        try
+        {
+            var report = await Task.Run(() => ConflictScan.RunAsync(address, Path.GetDirectoryName(_main.Paths.EngineExe)!,
+                Path.Combine(_main.Paths.DataDir, "diag"), CancellationToken.None));
+            var lines = ConflictScan.Explain(report);
+            ConflictText = string.Join("\n\n", lines);
+            foreach (var line in lines) Log("поиск мешающих программ: " + line, warning: !report.LanConnects);
+            foreach (var detail in report.Details) Log("поиск мешающих программ: " + detail);
+        }
+        catch (Exception e)
+        {
+            _log.Write("! " + e);
+            ConflictText = "Поиск не удался: " + e.Message;
+            Log("поиск мешающих программ не удался: " + e.Message, warning: true);
+        }
+        finally
+        {
+            IsFindingConflicts = false;
+        }
+    }
+
     public string HotspotText => Hotspot switch
     {
         null => "Если общего Wi-Fi нет (например, ПК подключён кабелем к модему), ПК может сам стать сетью Wi-Fi.",
