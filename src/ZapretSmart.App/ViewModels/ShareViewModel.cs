@@ -317,7 +317,13 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         try
         {
             var self = await ShareReachProbe.SelfConnectsAsync(address, port, CancellationToken.None);
-            Log(self ? "проверка связи: с самого ПК порт отвечает" : "проверка связи: порт не отвечает даже с самого ПК", warning: !self);
+            Log(self ? $"проверка связи: с самого ПК {Address}:{port} отвечает" : $"проверка связи: {Address}:{port} не отвечает даже с самого ПК", warning: !self);
+            var loopback = await ShareReachProbe.SelfConnectsAsync(IPAddress.Loopback, port, CancellationToken.None);
+            Log(loopback ? $"проверка связи: 127.0.0.1:{port} отвечает" : $"проверка связи: 127.0.0.1:{port} не отвечает", warning: !loopback);
+            var interceptors = OperatingSystem.IsWindows()
+                ? ShareReachProbe.ForeignInterceptors(Path.GetDirectoryName(_main.Paths.EngineExe)!)
+                : [];
+            foreach (var other in interceptors) Log("проверка связи: другой перехватчик пакетов: " + other, warning: true);
             var firewall = await ShareReachProbe.ReadFirewallAsync(CancellationToken.None);
             if (firewall.BlocksAllInbound) Log("проверка связи: в брандмауэре Windows включено «Блокировать все входящие подключения»", warning: true);
             if (firewall.ThirdParty.Count > 0) Log("проверка связи: сторонний брандмауэр: " + string.Join(", ", firewall.ThirdParty));
@@ -331,7 +337,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
                     if (ShareReachProbe.SynSource(packet.Span) is { } source) syns.AddOrUpdate(source, 1, (_, n) => n + 1);
                 }, stop.Token);
             }
-            var report = new ReachReport(port, Address, ShareReachProbe.Duration, self, firewall,
+            var report = new ReachReport(port, Address, ShareReachProbe.Duration, self, loopback, interceptors, firewall,
                 new Dictionary<IPAddress, int>(syns), [.. _reachConnected], sniffError);
             var lines = ShareReachProbe.Explain(report);
             ReachText = string.Join("\n", lines);

@@ -26,6 +26,16 @@ public sealed class ShareLog
     public string OldFilePath => Path.ChangeExtension(FilePath, ".old.log");
 
     /// <summary>
+    /// Папка профиля (C:\Users\имя) заменяется на %USERPROFILE%: в путях к спискам и движку иначе видно имя
+    /// пользователя Windows, а этот файл присылают для разбора.
+    /// </summary>
+    public static string Redact(string text, string? profile = null)
+    {
+        profile ??= Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return profile.Length > 3 ? text.Replace(profile.TrimEnd('\\', '/'), "%USERPROFILE%", StringComparison.OrdinalIgnoreCase) : text;
+    }
+
+    /// <summary>
     /// Пишет строку. С collapseRepeats такая же строка, записанная меньше минуты назад, пропускается, и ответ false.
     /// </summary>
     public bool Write(string line, bool collapseRepeats = false)
@@ -44,7 +54,7 @@ public sealed class ShareLog
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(FilePath))!);
                 var file = new FileInfo(FilePath);
                 if (file.Exists && file.Length > MaxBytes) File.Move(FilePath, OldFilePath, overwrite: true);
-                File.AppendAllText(FilePath, $"{now:yyyy-MM-dd HH:mm:ss} {line}{Environment.NewLine}");
+                File.AppendAllText(FilePath, $"{now:yyyy-MM-dd HH:mm:ss} {Redact(line)}{Environment.NewLine}");
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
