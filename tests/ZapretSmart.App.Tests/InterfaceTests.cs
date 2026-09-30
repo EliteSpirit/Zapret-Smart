@@ -24,7 +24,7 @@ public sealed class InterfaceTests : IDisposable
 {
     private readonly string _data = Path.Combine(Path.GetTempPath(), "zs-ui-" + Guid.NewGuid().ToString("N"));
 
-    private MainWindowViewModel CreateVm(string? engine = null)
+    private MainWindowViewModel CreateVm(string? engine = null, bool manageSystem = false)
     {
         var bin = AppContext.BaseDirectory;
         return new MainWindowViewModel(new AppPaths(
@@ -33,7 +33,8 @@ public sealed class InterfaceTests : IDisposable
             Path.Combine(bin, "lists"),
             Path.Combine(bin, "strategies"),
             Path.Combine(_data, "strategies"),
-            Path.Combine(_data, "settings.json")));
+            Path.Combine(_data, "settings.json"),
+            ManageSystem: manageSystem));
     }
 
     private (MainWindowViewModel Vm, MainWindow Window) Open()
@@ -198,6 +199,71 @@ public sealed class InterfaceTests : IDisposable
     }
 
     /// <summary>
+    /// Полный путь запуска раздачи, как в настоящем приложении на Windows: правило брандмауэра до открытия порта,
+    /// порт на адресе ПК в сети, журнал, снятие правила при выключении. Фильтрацию брандмауэра этот тест не проверяет:
+    /// подключение с самого ПК брандмауэр не фильтрует. Что правило снимает запреты Windows, проверяет тест ядра.
+    /// Программа в правиле подставная: иначе тест снял бы все входящие правила для testhost.exe или dotnet.exe.
+    /// Не на Windows и без ZS_LIVE=1 (администратор, как в CI) тест ничего не делает.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ShareStartsOnWindowsWithTheFirewallRuleAndAnswersOnTheLanAddress()
+    {
+        if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("ZS_LIVE") != "1") return;
+        const int port = 48890;
+        const string program = @"C:\Program Files\Zapret Smart Test\ZapretSmart.exe";
+        using var serial = FirewallTestLock.Take();
+        Directory.CreateDirectory(_data);
+        new ZapretSmart.Core.Settings.SettingsStore(Path.Combine(_data, "settings.json"))
+            .Save(new ZapretSmart.Core.Settings.AppSettings { SharePort = port });
+        var bin = AppContext.BaseDirectory;
+        using var vm = new MainWindowViewModel(new AppPaths(
+            Path.Combine(_data, "no-engine.exe"),
+            new EngineLayout(Path.Combine(bin, "engine", "fake"), Path.Combine(_data, "lists"), Path.Combine(_data, "ipsets")),
+            Path.Combine(bin, "lists"),
+            Path.Combine(bin, "strategies"),
+            Path.Combine(_data, "strategies"),
+            Path.Combine(_data, "settings.json"),
+            ManageSystem: true,
+            FirewallProgram: program));
+        try
+        {
+            vm.Share.IsEnabled = true;
+            await WaitFor(() => vm.Log.Any(l => l.Contains($"прокси слушает порт {port}", StringComparison.Ordinal)), seconds: 90);
+            Assert.Contains(vm.Log, l => l.Contains($"брандмауэр открыт для порта {port}", StringComparison.Ordinal));
+            Assert.DoesNotContain(vm.Log, l => l.StartsWith("! Раздача", StringComparison.Ordinal));
+            var rule = Netsh("advfirewall", "firewall", "show", "rule", $"name={ZapretSmart.Core.Share.ShareFirewall.RuleName}", "verbose");
+            Assert.Contains(port.ToString(), rule);
+            Assert.Contains(program, rule, StringComparison.OrdinalIgnoreCase);
+
+            var address = vm.Share.Address is { } a ? System.Net.IPAddress.Parse(a) : System.Net.IPAddress.Loopback;
+            Assert.StartsWith("HTTP/1.1 200", await Fetch(port, "/proxy.pac", address));
+            await WaitFor(() => vm.Log.Any(l => l.Contains("забрал файл автонастройки proxy.pac", StringComparison.Ordinal)));
+
+            vm.Share.IsEnabled = false;
+            await WaitFor(() => vm.Log.Any(l => l.Contains("Раздача: прокси остановлен", StringComparison.Ordinal)), seconds: 30);
+            await WaitFor(() => !Netsh("advfirewall", "firewall", "show", "rule", $"name={ZapretSmart.Core.Share.ShareFirewall.RuleName}").Contains(port.ToString()), seconds: 60);
+            var shareLog = File.ReadAllText(Path.Combine(_data, "share.log"));
+            Assert.Contains("включаю раздачу", shareLog);
+            Assert.Contains("ставлю правило брандмауэра для ZapretSmart.exe", shareLog);
+            Assert.DoesNotContain("Program Files", shareLog);
+        }
+        finally
+        {
+            Netsh("advfirewall", "firewall", "delete", "rule", $"name={ZapretSmart.Core.Share.ShareFirewall.RuleName}");
+        }
+    }
+
+    private static string Netsh(params string[] args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("netsh") { RedirectStandardOutput = true, UseShellExecute = false };
+        foreach (var arg in args) psi.ArgumentList.Add(arg);
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var output = p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+        return output;
+    }
+
+    /// <summary>
     /// Прокрутка до конца показывает страницу целиком. С Padding у ScrollViewer нижний отступ не входил в прокручиваемую
     /// высоту, и низ настроек (карточка «Версия приложения» с кнопками) уезжал за окно. Сообщил пользователь.
     /// </summary>
@@ -223,9 +289,9 @@ public sealed class InterfaceTests : IDisposable
         }
     }
 
-    private static async Task WaitFor(Func<bool> condition)
+    private static async Task WaitFor(Func<bool> condition, double seconds = 5)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(5);
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
         while (!condition())
         {
             Assert.True(DateTime.UtcNow < deadline, "не дождались");
@@ -234,10 +300,10 @@ public sealed class InterfaceTests : IDisposable
         }
     }
 
-    private static async Task<string> Fetch(int port, string path)
+    private static async Task<string> Fetch(int port, string path, System.Net.IPAddress? address = null)
     {
         using var s = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
-        await s.ConnectAsync(System.Net.IPAddress.Loopback, port);
+        await s.ConnectAsync(address ?? System.Net.IPAddress.Loopback, port);
         await s.SendAsync(System.Text.Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: x\r\n\r\n"), System.Net.Sockets.SocketFlags.None);
         var buffer = new byte[8192];
         var sb = new System.Text.StringBuilder();
