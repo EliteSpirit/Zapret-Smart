@@ -1,10 +1,10 @@
 {
   "id": "general-multisplit",
   "name": "Общая: fake + multisplit",
-  "description": "Сайты из списков general и blocked (обновляется сам) плюс домены, которые движок сам распознал как заблокированные. TLS: фейк + разрез по midsld, HTTP: autottl, QUIC: фейковый initial.",
+  "description": "Сайты из списков general и blocked (обновляется сам) плюс домены, которые движок сам распознал как заблокированные. TLS: фейк + разрез по midsld, HTTP: autottl, QUIC: фейковый initial. Голос Discord: фейк для UDP discord/stun.",
   "intercept": {
     "tcp": "80,443",
-    "udp": "443"
+    "udp": "443,19294-19344,50000-50100"
   },
   "profiles": [
     {
@@ -45,6 +45,14 @@
         "dpi-desync-repeats=6",
         "dpi-desync-fooling=md5sig",
         "dpi-desync-fake-tls=tls_clienthello_www_google_com.bin"
+      ]
+    },
+    {
+      "args": [
+        "filter-udp=19294-19344,50000-50100",
+        "filter-l7=discord,stun",
+        "dpi-desync=fake",
+        "dpi-desync-repeats=6"
       ]
     }
   ]

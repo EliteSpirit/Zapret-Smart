@@ -274,6 +274,38 @@ public class StrategySearchTests
     }
 
     [Fact]
+    public void SavedStrategyGetsQuicAndDiscordVoice()
+    {
+        string[] lists = ["found", "general", "blocked"];
+        foreach (var c in AllGenerated())
+        {
+            var tcp = CandidateGenerator.ToStrategy(c, "found", "found", lists, true, "");
+            var s = UdpProfiles.Add(tcp, quic: true, voice: true, lists);
+            Assert.Empty(StrategyValidator.Validate(s));
+            Assert.Equal(tcp.Intercept!.Tcp, s.Intercept!.Tcp);
+            Assert.Equal("443,19294-19344,50000-50100", s.Intercept.Udp);
+            Assert.Equal(tcp.Profiles.Count + 2, s.Profiles.Count);
+            var quic = s.Profiles[^2];
+            Assert.Equal("filter-udp=443", quic.Args[0]);
+            Assert.Equal(lists, quic.Hostlists);
+            var voice = s.Profiles[^1];
+            Assert.Equal(["filter-udp=19294-19344,50000-50100", "filter-l7=discord,stun"], voice.Args.Take(2));
+            Assert.Empty(voice.Hostlists);
+        }
+    }
+
+    [Fact]
+    public void UdpProfilesAreOptionalAndPortsDoNotRepeat()
+    {
+        var tcp = CandidateGenerator.ToStrategy(AllGenerated().First(), "found", "found", ["general"], true, "");
+        Assert.Same(tcp, UdpProfiles.Add(tcp, quic: false, voice: false, ["general"]));
+        Assert.Equal("443", UdpProfiles.Add(tcp, quic: true, voice: false, ["general"]).Intercept!.Udp);
+        Assert.Equal("19294-19344,50000-50100", UdpProfiles.Add(tcp, quic: false, voice: true, ["general"]).Intercept!.Udp);
+        var withQuic = tcp with { Intercept = tcp.Intercept! with { Udp = "443" } };
+        Assert.Equal("443,19294-19344,50000-50100", UdpProfiles.Add(withQuic, quic: true, voice: true, ["general"]).Intercept!.Udp);
+    }
+
+    [Fact]
     public void RefineChangesExactlyOneThing()
     {
         foreach (var seed in CandidateGenerator.Explore())

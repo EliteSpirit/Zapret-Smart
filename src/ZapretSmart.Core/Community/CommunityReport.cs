@@ -56,13 +56,15 @@ public static partial class CommunityReports
     public static Strategy? ToStrategy(CommunityReport report, IReadOnlyList<string> hostlists)
     {
         if (report.Args is null || report.Args.Count is 0 or > StrategyValidator.MaxArgsPerProfile) return null;
-        var s = CandidateGenerator.ToStrategy(
+        // Из базы приходит TCP-часть; QUIC и голос Discord добавляются так же, как к стратегии из своего поиска.
+        var s = UdpProfiles.Add(CandidateGenerator.ToStrategy(
             new Candidate("community", report.Args),
             id: "community-" + report.Asn,
             name: $"Сообщество: AS{report.Asn}",
             hostlists: hostlists,
             autoHostlist: false,
-            description: $"Из общей базы: {report.Passed}/{report.Total} целей, {report.MedianLatencyMs} мс. Не проверена у вас.");
+            description: $"Из общей базы: {report.Passed}/{report.Total} целей, {report.MedianLatencyMs} мс. Не проверена у вас. UDP: QUIC и голос Discord из готовых стратегий."),
+            quic: true, voice: true, hostlists);
         return StrategyValidator.Validate(s).Count == 0 ? s : null;
     }
 }

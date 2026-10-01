@@ -34,6 +34,28 @@ public sealed class StorageAndCommunityTests : IDisposable
     }
 
     [Fact]
+    public void FoundStrategyFromOldVersionGetsUdp()
+    {
+        var store = new UserStrategyStore(_dir);
+        var old = Sample("user-0ld0ld00") with { Name = "Старая", Description = "Найдена поиском 01.09.2026: 3/3 целей. Списки: general. QUIC не перехватывается." };
+        var edited = Sample("user-ed1ted00") with { Description = "Моё описание" };
+        var custom = Sample("my-own") with { Description = old.Description };
+        foreach (var s in new[] { old, edited, custom }) store.Save(s);
+
+        Assert.Equal(["Старая"], store.UpgradeFoundStrategies());
+        var up = StrategyLoader.LoadFile(store.PathFor(old.Id)).Strategy!;
+        Assert.Equal("443,19294-19344,50000-50100", up.Intercept!.Udp);
+        Assert.Equal(old.Profiles[0].Args, up.Profiles[0].Args);
+        Assert.Equal(["general"], up.Profiles[1].Hostlists);
+        Assert.EndsWith(UdpProfiles.UdpNote, up.Description);
+        Assert.DoesNotContain("не перехватывается", up.Description);
+        Assert.Null(StrategyLoader.LoadFile(store.PathFor(edited.Id)).Strategy!.Intercept!.Udp);
+        Assert.Null(StrategyLoader.LoadFile(store.PathFor(custom.Id)).Strategy!.Intercept!.Udp);
+        // Второй запуск ничего не меняет.
+        Assert.Empty(store.UpgradeFoundStrategies());
+    }
+
+    [Fact]
     public void InvalidStrategyIsNotSaved()
     {
         var store = new UserStrategyStore(_dir);
@@ -190,7 +212,11 @@ public sealed class StorageAndCommunityTests : IDisposable
         var evil = new CommunityReport(1, "Москва", ["dpi-desync=fake", "dpi-desync-fake-tls=C:\\Users\\me\\wallet.dat"], 3, 3, 100);
         Assert.Null(CommunityReports.ToStrategy(evil, ["general"]));
         var ok = new CommunityReport(1, "Москва", ["dpi-desync=multisplit", "dpi-desync-split-pos=1"], 3, 3, 100);
-        Assert.NotNull(CommunityReports.ToStrategy(ok, ["general"]));
+        var s = CommunityReports.ToStrategy(ok, ["general"]);
+        Assert.NotNull(s);
+        // Из базы приходит только TCP-часть, а QUIC и голос Discord добавляются: без них Shorts и звонки шли без обхода.
+        Assert.Equal("443,19294-19344,50000-50100", s.Intercept!.Udp);
+        Assert.Contains(s.Profiles, p => p.Args.Contains("filter-l7=discord,stun"));
     }
 
     public void Dispose()

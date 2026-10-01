@@ -69,6 +69,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             AppendLog("! Не удалось подготовить списки доменов: " + e.Message);
         }
+        foreach (var name in UserStrategies.UpgradeFoundStrategies())
+            AppendLog($"Стратегия «{name}»: добавлены QUIC (видео и Shorts YouTube) и голос Discord.");
 
         _runner = new EngineRunner(paths.EngineExe);
         _runner.Output += line => Dispatcher.UIThread.Post(() => AppendLog(line));
