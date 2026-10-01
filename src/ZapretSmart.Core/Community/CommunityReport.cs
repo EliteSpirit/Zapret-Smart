@@ -24,16 +24,29 @@ public static partial class CommunityReports
     [GeneratedRegex(@"^[\p{L}][\p{L} .-]{0,63}$")]
     private static partial Regex RegionRe();
 
-    public static bool IsStandardTargets(IEnumerable<string> targets) =>
-        targets.Select(t => t.Trim().ToLowerInvariant()).Order(StringComparer.Ordinal)
-            .SequenceEqual(StandardTargets.Order(StringComparer.Ordinal));
+    /// <summary>
+    /// Можно ли отправить отчёт по этим целям: стандартный набор или стандартный набор с CDN сервисов
+    /// (SearchTargets.Default). Свой набор доменов — отпечаток интересов человека, его не отправляем.
+    /// </summary>
+    public static bool IsStandardTargets(IEnumerable<string> targets)
+    {
+        var set = targets.Select(SearchTargets.Normalize).Distinct().Order(StringComparer.Ordinal).ToList();
+        return set.SequenceEqual(StandardTargets.Order(StringComparer.Ordinal))
+            || set.SequenceEqual(SearchTargets.Default.Order(StringComparer.Ordinal));
+    }
 
-    /// <summary>null — отчёт не формируется: нет результата или цели не стандартные.</summary>
+    /// <summary>
+    /// null — отчёт не формируется: нет результата или цели не стандартные. Метрики считаются только по трём
+    /// стандартным сайтам, даже если поиск шёл и по CDN: так отчёты разных версий сравнимы между собой.
+    /// </summary>
     public static CommunityReport? FromSearch(SearchResult result, IEnumerable<string> targets, uint asn, string region)
     {
         if (result.Best is not { } best || !IsStandardTargets(targets)) return null;
         if (asn == 0 || !RegionRe().IsMatch(region)) return null;
-        return new CommunityReport(asn, region, best.Candidate.Args, best.Passed, best.Total, (int)best.MedianLatency.TotalMilliseconds);
+        var total = result.Blocked.Count(StandardTargets.Contains);
+        if (total == 0) return null;
+        var passed = total - best.Failed.Count(StandardTargets.Contains);
+        return new CommunityReport(asn, region, best.Candidate.Args, passed, total, (int)best.MedianLatency.TotalMilliseconds);
     }
 
     /// <summary>

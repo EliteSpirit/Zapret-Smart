@@ -216,6 +216,53 @@ public class StrategySearchTests
         Assert.Equal(same, HttpsProber.IsSameSite(host, domain));
     }
 
+    /// <summary>
+    /// Цели по умолчанию: сайты вместе с их CDN. Стратегия, найденная по одной главной странице, оставляла YouTube
+    /// без видео и картинок, а Discord без вложений и чата.
+    /// </summary>
+    [Fact]
+    public void DefaultTargetsCoverServiceCdns()
+    {
+        var all = SearchTargets.Default;
+        foreach (var cdn in new[] { "redirector.googlevideo.com", "yt3.ggpht.com", "gateway.discord.gg", "media.discordapp.net", "cdn.discordapp.com" })
+            Assert.Contains(all, t => SearchTargets.Host(t) == cdn);
+        Assert.Contains("i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg", all);
+        foreach (var standard in ZapretSmart.Core.Community.CommunityReports.StandardTargets) Assert.Contains(standard, all);
+        Assert.All(all, t => Assert.True(SearchTargets.IsValid(t), t));
+    }
+
+    [Theory]
+    [InlineData("discord.com", "discord.com", "/")]
+    [InlineData("I.YTIMG.com/vi/dQw4w9WgXcQ/maxresdefault.jpg", "i.ytimg.com", "/vi/dQw4w9WgXcQ/maxresdefault.jpg")]
+    public void TargetsSplitIntoHostAndCaseSensitivePath(string target, string host, string path)
+    {
+        Assert.Equal(host, SearchTargets.Host(target));
+        Assert.Equal(path, SearchTargets.PathOf(target));
+        // Путь не переводится в нижний регистр: у обложки YouTube иначе был бы 404 и ложная «блокировка».
+        Assert.Equal($"https://{host}{path}", HttpsProber.UrlFor(target).AbsoluteUri);
+        Assert.EndsWith(path == "/" ? host : path, SearchTargets.Normalize(target));
+    }
+
+    [Theory]
+    [InlineData("i.ytimg.com/vi/x.jpg?sig=1", false)]
+    [InlineData("i.ytimg.com/../etc/passwd", false)]
+    [InlineData("i.ytimg.com/a b.jpg", false)]
+    [InlineData("not a domain", false)]
+    [InlineData("cdn.discordapp.com/embed/avatars/0.png", true)]
+    [InlineData("rutracker.org", true)]
+    public void OnlyPlainDomainsAndSafeFilePathsAreAccepted(string target, bool valid) =>
+        Assert.Equal(valid, SearchTargets.IsValid(target));
+
+    [Fact]
+    public void HostlistGetsDomainsOnlyAndResultsShowThemShort()
+    {
+        string[] targets = ["www.youtube.com", "i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg", "i.ytimg.com/vi/other/hq.jpg", "discord.com"];
+        Assert.Equal(["www.youtube.com", "i.ytimg.com", "discord.com"], SearchTargets.Hosts(targets));
+        Assert.Equal("www.youtube.com, i.ytimg.com, discord.com", SearchTargets.DisplayList(targets));
+        Assert.Equal(["youtube", "discord", "rutracker"], SearchTargets.SelectedGroups(SearchTargets.Default));
+        Assert.Equal(["rutracker"], SearchTargets.SelectedGroups(["rutracker.org", "www.youtube.com"]));
+    }
+
     [Fact]
     public void GeneratedCandidatesPassWhitelist()
     {

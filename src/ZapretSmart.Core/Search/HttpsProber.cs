@@ -33,7 +33,9 @@ public sealed class HttpsProber(TimeSpan timeout, int minBytes = 64 * 1024, bool
 
         try
         {
-            var url = new Uri($"https://{domain}/");
+            // Цель: домен или домен с путём к файлу (см. SearchTargets). Редиректы — только в пределах домена цели.
+            var host = SearchTargets.Host(domain);
+            var url = UrlFor(domain);
             for (var hop = 0; ; hop++)
             {
                 using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -47,7 +49,7 @@ public sealed class HttpsProber(TimeSpan timeout, int minBytes = 64 * 1024, bool
                 if ((int)resp.StatusCode is >= 300 and < 400 && resp.Headers.Location is { } location && hop < MaxRedirects)
                 {
                     var next = location.IsAbsoluteUri ? location : new Uri(url, location);
-                    if (next.Scheme == Uri.UriSchemeHttps && IsSameSite(next.Host, domain))
+                    if (next.Scheme == Uri.UriSchemeHttps && IsSameSite(next.Host, host))
                     {
                         url = next;
                         continue;
@@ -71,6 +73,9 @@ public sealed class HttpsProber(TimeSpan timeout, int minBytes = 64 * 1024, bool
             return new ProbeResult(domain, false, sw.Elapsed, total, e.GetBaseException().Message);
         }
     }
+
+    /// <summary>Адрес первой пробы цели: https, домен в нижнем регистре, путь как есть.</summary>
+    public static Uri UrlFor(string target) => new($"https://{SearchTargets.Host(target)}{SearchTargets.PathOf(target)}");
 
     /// <summary>Тот же домен или его поддомен: такие имена покрывает hostlist цели.</summary>
     public static bool IsSameSite(string host, string domain) =>

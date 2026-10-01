@@ -313,6 +313,31 @@ public sealed class InterfaceTests : IDisposable
     }
 
     /// <summary>
+    /// Поиск по умолчанию проверяет сервисы вместе с CDN. Галка сервиса убирает и возвращает все его адреса,
+    /// а ручная правка списка снимает галку; путь к файлу не теряет заглавные буквы.
+    /// </summary>
+    [AvaloniaFact]
+    public void SearchServicesToggleTheirCdnTargets()
+    {
+        using var vm = CreateVm();
+        var search = vm.Search;
+        Assert.Contains("gateway.discord.gg", search.TargetsText);
+        Assert.Contains("i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg", search.TargetsText);
+        Assert.All(search.Groups, g => Assert.True(g.IsSelected));
+
+        var discord = search.Groups.Single(g => g.Group.Id == "discord");
+        discord.IsSelected = false;
+        Assert.DoesNotContain("discord", search.TargetsText);
+        Assert.Contains("dQw4w9WgXcQ", search.TargetsText);
+        discord.IsSelected = true;
+        Assert.Contains("media.discordapp.net", search.TargetsText);
+
+        search.TargetsText = search.TargetsText.Replace("yt3.ggpht.com\n", "");
+        Assert.False(search.Groups.Single(g => g.Group.Id == "youtube").IsSelected);
+        Assert.True(discord.IsSelected);
+    }
+
+    /// <summary>
     /// Ролик заставки лежит в поставке, это MP4 с H.264, и индекс moov у него стоит до данных: иначе Safari на iPhone
     /// ждал бы загрузки всего файла, прежде чем начать показ.
     /// </summary>
