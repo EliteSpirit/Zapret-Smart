@@ -351,8 +351,19 @@
               <Border Classes="card">
                 <Grid ColumnDefinitions="*,20,200">
                   <StackPanel Spacing="6">
-                    <TextBlock Classes="caption" Text="Сайты для проверки, по одному на строку" />
-                    <TextBox Text="{Binding TargetsText}" AcceptsReturn="True" Height="84" IsEnabled="{Binding !IsSearching}" />
+                    <TextBlock Classes="caption" Text="Сервисы: сайт вместе с его CDN (видео, картинки, вложения часто режут отдельно от сайта)" TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding Groups}" IsEnabled="{Binding !IsSearching}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:TargetGroupOption">
+                          <CheckBox IsChecked="{Binding IsSelected}" Content="{Binding Title}" Margin="0,0,16,0" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="caption" Text="Сайты и адреса файлов для проверки, по одному на строку" />
+                    <TextBox Text="{Binding TargetsText}" AcceptsReturn="True" Height="140" IsEnabled="{Binding !IsSearching}" />
                   </StackPanel>
                   <StackPanel Grid.Column="2" Spacing="6">
                     <TextBlock Classes="caption" Text="Лимит времени" />
@@ -514,7 +525,7 @@
                                 AutomationProperties.Name="Сторож" Margin="16,0,0,0" />
                   <StackPanel Spacing="4">
                     <TextBlock Classes="title" Text="Сторож" />
-                    <TextBlock Classes="muted" Text="Пока обход включён, раз в 5 минут проверяет www.youtube.com, discord.com и rutracker.org. Если сайты перестали открываться, сам подбирает стратегию получше, но не чаще раза в 30 минут. Если сайты не открывались с самого начала, стратегию не трогает и советует поиск." />
+                    <TextBlock Classes="muted" Text="Пока обход включён, раз в 5 минут проверяет YouTube, Discord и rutracker вместе с их CDN: видео, обложки, вложения, чат. Если сайты перестали открываться, сам подбирает стратегию получше, но не чаще раза в 30 минут. Если сайты не открывались с самого начала, стратегию не трогает и советует поиск." />
                   </StackPanel>
                 </DockPanel>
               </Border>

@@ -151,6 +151,24 @@ public sealed class StorageAndCommunityTests : IDisposable
         Assert.Equal(240, r.MedianLatencyMs);
     }
 
+    /// <summary>
+    /// Поиск с CDN сервисов тоже можно отправлять: набор фиксированный, интересов человека не выдаёт. Метрики только
+    /// по трём стандартным сайтам, чтобы отчёты старых и новых версий сравнивались.
+    /// </summary>
+    [Fact]
+    public void ReportFromTheCdnSetCountsOnlyTheStandardSites()
+    {
+        Assert.True(CommunityReports.IsStandardTargets(SearchTargets.Default));
+        var result = new SearchResult(
+            ["www.youtube.com", "discord.com", "gateway.discord.gg", "i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg"], ["rutracker.org"], [],
+            new CandidateScore(new Candidate("x", ["dpi-desync=multisplit"]), ["discord.com", "gateway.discord.gg"], 4, TimeSpan.FromMilliseconds(300), null),
+            false);
+        var r = CommunityReports.FromSearch(result, SearchTargets.Default, 12389, "Москва");
+        Assert.NotNull(r);
+        Assert.Equal((1, 2), (r!.Passed, r.Total));
+        Assert.Null(CommunityReports.FromSearch(result, [.. SearchTargets.Default, "my-secret-site.org"], 12389, "Москва"));
+    }
+
     [Fact]
     public void NoReportForPersonalTargets()
     {

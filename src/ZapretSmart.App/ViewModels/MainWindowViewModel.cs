@@ -37,7 +37,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public static readonly TimeSpan WatchdogFirstCheck = TimeSpan.FromSeconds(20);
     public static readonly TimeSpan WatchdogInterval = TimeSpan.FromMinutes(5);
-    public static IReadOnlyList<string> CheckTargets => CommunityReports.StandardTargets;
+    /// <summary>
+    /// Что проверяет сторож: сервисы вместе с их CDN. По одним главным страницам он не замечал, что у YouTube
+    /// перестали грузиться видео и обложки, а у Discord вложения и чат.
+    /// </summary>
+    public static IReadOnlyList<string> CheckTargets => SearchTargets.Default;
 
     public MainWindowViewModel(AppPaths paths)
     {

@@ -48,7 +48,9 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     public SearchViewModel(MainWindowViewModel main)
     {
         _main = main;
-        _targetsText = string.Join('\n', CommunityReports.StandardTargets);
+        _targetsText = string.Join('\n', SearchTargets.Default);
+        Groups = SearchTargets.Groups.Select(g => new TargetGroupOption(g, this)).ToList();
+        SyncGroups();
     }
 
     public IReadOnlyList<int> Budgets { get; } = [3, 6, 10, 20];
@@ -95,7 +97,32 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     private bool _hasResult;
 
     private IReadOnlyList<string> Targets =>
-        TargetsText.Split('\n').Select(t => t.Trim().ToLowerInvariant()).Where(t => t.Length > 0).Distinct().ToList();
+        TargetsText.Split('\n').Select(SearchTargets.Normalize).Where(t => t.Length > 0).Distinct().ToList();
+
+    /// <summary>Сервисы с CDN: галка добавляет в список все их цели или убирает их.</summary>
+    public IReadOnlyList<TargetGroupOption> Groups { get; }
+
+    private bool _syncingGroups;
+
+    partial void OnTargetsTextChanged(string value) => SyncGroups();
+
+    private void SyncGroups()
+    {
+        if (_syncingGroups || Groups is null) return;
+        _syncingGroups = true;
+        var selected = SearchTargets.SelectedGroups(Targets);
+        foreach (var g in Groups) g.IsSelected = selected.Contains(g.Group.Id);
+        _syncingGroups = false;
+    }
+
+    internal void SetGroup(TargetGroup group, bool on)
+    {
+        if (_syncingGroups) return;
+        var targets = Targets.ToList();
+        if (on) targets.AddRange(group.Targets.Where(t => !targets.Contains(t)));
+        else targets.RemoveAll(group.Targets.Contains);
+        TargetsText = string.Join('\n', targets);
+    }
 
     private bool CanStart() => IsWindows && !IsSearching;
 
@@ -103,10 +130,10 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     private async Task Start()
     {
         var targets = Targets;
-        var invalid = targets.Where(t => !EngineOptionCatalog.IsDomain(t)).ToList();
+        var invalid = targets.Where(t => !SearchTargets.IsValid(t)).ToList();
         if (targets.Count == 0 || invalid.Count > 0)
         {
-            Summary = targets.Count == 0 ? "Укажите хотя бы один домен." : "Это не домены: " + string.Join(", ", invalid);
+            Summary = targets.Count == 0 ? "Укажите хотя бы один домен." : "Это не домены и не адреса файлов: " + string.Join(", ", invalid);
             return;
         }
 
@@ -131,7 +158,7 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
 
             _tempDir = Path.Combine(Path.GetTempPath(), "ZapretSmart-search-" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(_tempDir);
-            await File.WriteAllLinesAsync(Path.Combine(_tempDir, SearchOptions.TargetsListId + ".txt"), targets);
+            await File.WriteAllLinesAsync(Path.Combine(_tempDir, SearchOptions.TargetsListId + ".txt"), SearchTargets.Hosts(targets));
 
             var layout = _main.Paths.Layout with { ListsDir = _tempDir, IpsetsDir = _tempDir };
             _host = new WinwsEngineHost(_main.Paths.EngineExe, layout, EngineReadyTimeout);
@@ -196,7 +223,7 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
             $"Найдена поиском {DateTime.Now:dd.MM.yyyy}: {Best.Passed}/{Best.Total} целей, {Best.MedianLatency.TotalMilliseconds:0} мс. {Best.Candidate.Label}. Списки: сайты из поиска ({id}), general, blocked и автосписок. QUIC не перехватывается.");
         try
         {
-            _main.ListStore.WriteHostlist(id, _blocked);
+            _main.ListStore.WriteHostlist(id, SearchTargets.Hosts(_blocked));
             _main.UserStrategies.Save(s);
         }
         catch (Exception e) when (e is StrategyRejectedException or IOException or UnauthorizedAccessException)
@@ -239,7 +266,7 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         Best = r.Best;
         _blocked = r.Blocked;
         var lines = new List<string>();
-        if (r.NotBlocked.Count > 0) lines.Add("Открываются и без обхода: " + string.Join(", ", r.NotBlocked));
+        if (r.NotBlocked.Count > 0) lines.Add("Открываются и без обхода: " + SearchTargets.DisplayList(r.NotBlocked));
         if (r.Blocked.Count == 0)
         {
             lines.Add("Ни одна цель не заблокирована — искать нечего. Если сайты на самом деле не работают в браузере: проверьте, не включён ли VPN или другой обход (GoodbyeDPI, zapret) — тогда проверка идёт через них.");
@@ -252,9 +279,9 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         {
             lines.Add($"Лучшее: {r.Best.Candidate.Label}: {r.Best.Passed}/{r.Best.Total}, {r.Best.MedianLatency.TotalMilliseconds:0} мс, подтверждено повторными прогонами.");
             if (r.MissedByBest.Count > 0)
-                lines.Add("С ней не открылись, хотя открывались другими вариантами (см. список ниже): " + string.Join(", ", r.MissedByBest));
+                lines.Add("С ней не открылись, хотя открывались другими вариантами (см. список ниже): " + SearchTargets.DisplayList(r.MissedByBest));
             if (r.Unreachable.Count > 0)
-                lines.Add("Не открыл ни один вариант (вероятно, блокировка по IP или подмена DNS): " + string.Join(", ", r.Unreachable));
+                lines.Add("Не открыл ни один вариант (вероятно, блокировка по IP или подмена DNS): " + SearchTargets.DisplayList(r.Unreachable));
         }
         if (r.BudgetExhausted) lines.Add("Время вышло до конца перебора — можно запустить поиск с большим лимитом.");
         if (_main.CommunityEnabled && r.Best is not null)
@@ -288,4 +315,16 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         _cts?.Cancel();
         _host?.Dispose();
     }
+}
+
+/// <summary>Галка сервиса на странице поиска.</summary>
+public sealed partial class TargetGroupOption(TargetGroup group, SearchViewModel owner) : ObservableObject
+{
+    public TargetGroup Group { get; } = group;
+
+    public string Title => $"{Group.Name}: {Group.Description}";
+
+    [ObservableProperty] private bool _isSelected;
+
+    partial void OnIsSelectedChanged(bool value) => owner.SetGroup(Group, value);
 }
