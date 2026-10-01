@@ -246,9 +246,8 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.DoesNotContain("evil", response);
     }
 
-    /// <summary>Каждый исход запроса попадает в журнал: по нему видно, дошёл ли телефон до ПК и что ему ответили.</summary>
-    [Fact]
-    public async Task EveryRequestOutcomeIsLogged()
+    /// <summary>Одни и те же запросы телефона: автонастройка, профиль, неизвестный путь, ошибки и одно удачное соединение.</summary>
+    private async Task<(string[] Lines, ShareProxy Proxy, int SitePort)> RunPhoneSession(bool logSites)
     {
         var site = Site();
         var logged = new System.Collections.Concurrent.ConcurrentQueue<string>();
@@ -257,6 +256,7 @@ public sealed class ShareTests : IAsyncDisposable
             Port = 0, BindAddress = IPAddress.Loopback, AllowDestination = _ => true, HeaderTimeout = TimeSpan.FromMilliseconds(300),
             Resolve = (host, _) => host == "site.test" ? Task.FromResult(new[] { IPAddress.Loopback })
                 : throw new SocketException((int)SocketError.HostNotFound),
+            LogTargets = () => logSites,
         });
         proxy.Logged += (ip, text) => logged.Enqueue($"{ip} {text}");
 
@@ -281,23 +281,49 @@ public sealed class ShareTests : IAsyncDisposable
             (await site.Accepted).Dispose();
         }
 
-        var lines = logged.ToArray();
+        return (logged.ToArray(), proxy, site.Port);
+    }
+
+    /// <summary>С адресами сайтов (подробный журнал) каждый исход запроса попадает в журнал вместе с адресом.</summary>
+    [Fact]
+    public async Task DetailedLogNamesTheSiteOfEveryOutcome()
+    {
+        var (lines, _, sitePort) = await RunPhoneSession(logSites: true);
         Assert.All(lines, l => Assert.StartsWith("127.0.0.1 ", l));
         Assert.Contains(lines, l => l.Contains("забрал файл автонастройки proxy.pac"));
         Assert.Contains(lines, l => l.Contains("просил профиль iPhone, но имя сети Wi-Fi не задано"));
         Assert.Contains(lines, l => l.Contains("открыл адрес /favicon.ico, такого нет"));
-        Assert.Contains(lines, l => l.Contains("nowhere.invalid:443: имя не найдено в DNS"));
+        Assert.Contains(lines, l => l.Contains("nowhere.invalid:443: имя сайта не найдено в DNS"));
         Assert.Contains(lines, l => l.Contains("example.com:25: порт запрещён"));
         Assert.Contains(lines, l => l.Contains("непонятный запрос"));
         Assert.Contains(lines, l => l.Contains("не прислал запрос за 0 с"));
-        Assert.Contains(lines, l => l.Contains($"открыл site.test:{site.Port}"));
+        Assert.Contains(lines, l => l.Contains($"открыл site.test:{sitePort}"));
+    }
+
+    /// <summary>
+    /// По умолчанию журнал не история посещений: адресов сайтов в нём нет ни при удаче, ни при ошибке, а что прошло
+    /// через ПК, видно по счётчикам каждого устройства.
+    /// </summary>
+    [Fact]
+    public async Task ByDefaultTheLogKeepsNoSitesOnlyCounts()
+    {
+        var (lines, proxy, _) = await RunPhoneSession(logSites: false);
+        Assert.DoesNotContain(lines, l => l.Contains("site.test") || l.Contains("nowhere.invalid") || l.Contains("example.com"));
+        Assert.Contains(lines, l => l.Contains("имя сайта не найдено в DNS"));
+        Assert.Contains(lines, l => l.Contains("порт 25 запрещён"));
+        Assert.Contains(lines, l => l.Contains("забрал файл автонастройки proxy.pac"));
+
+        var (client, tally) = Assert.Single(proxy.TakeTallies());
+        Assert.Equal(IPAddress.Loopback, client);
+        Assert.Equal(new ClientTally(Connections: 1, NameNotFound: 1, Unreachable: 0, Refused: 1, BadRequests: 1), tally);
+        Assert.Empty(proxy.TakeTallies());
     }
 
     [Fact]
     public async Task SuccessfulConnectionsAreLoggedOncePerServer()
     {
         var logged = new System.Collections.Concurrent.ConcurrentQueue<string>();
-        var proxy = Proxy();
+        var proxy = Proxy(new ShareProxyOptions { Port = 0, BindAddress = IPAddress.Loopback, AllowDestination = _ => true, LogTargets = () => true });
         proxy.Logged += (_, text) => logged.Enqueue(text);
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();

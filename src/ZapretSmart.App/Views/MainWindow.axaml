@@ -672,8 +672,12 @@
                       <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button Classes="small" Content="Журнал раздачи" Command="{Binding OpenLogCommand}" IsEnabled="{Binding IsHotspotAvailable}"
                                 ToolTip.Tip="Что просил телефон и чем кончилось. Этот файл пригодится, если телефон не подключается." />
-                        <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding LogFile}" TextTrimming="CharacterEllipsis" />
+                        <Button Classes="small" Content="Очистить журнал" Command="{Binding ClearLogCommand}"
+                                ToolTip.Tip="Удаляет share.log и его прошлую часть." />
                       </StackPanel>
+                      <CheckBox IsChecked="{Binding Main.ShareLogSites}" Content="Писать в журнал адреса сайтов" />
+                      <TextBlock Classes="caption" TextWrapping="Wrap"
+                                 Text="Без этой галки журнал хранит только сводку: сколько соединений прошло от каждого устройства и какие были ошибки. С ней в журнале видно, какие сайты открывали устройства. Включайте только на время разбора проблемы с конкретным сайтом и не пересылайте такой журнал без нужды." />
                       <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button Classes="small" Content="Проверить связь с телефоном" Command="{Binding CheckReachCommand}"
                                 ToolTip.Tip="Минуту слушает порт прокси и говорит, где рвётся связь: прокси, брандмауэр на ПК или сеть." />

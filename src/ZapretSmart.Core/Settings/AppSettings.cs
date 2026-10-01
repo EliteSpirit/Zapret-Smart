@@ -40,6 +40,12 @@ public sealed record AppSettings
     /// </summary>
     public bool ShareAutoStart { get; init; }
 
+    /// <summary>
+    /// Писать в журнал раздачи адреса сайтов, которые открывают устройства. По умолчанию выключено: журнал тогда
+    /// был бы историей посещений, а его присылают для разбора проблем.
+    /// </summary>
+    public bool ShareLogSites { get; init; }
+
     /// <summary>Стратегия движка раздачи. Пусто — та же, что выбрана для обхода ПК.</summary>
     public string? ShareStrategyId { get; init; }
 
