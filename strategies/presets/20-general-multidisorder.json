@@ -1,10 +1,10 @@
 {
   "id": "general-multidisorder",
   "name": "Общая: fake + multidisorder",
-  "description": "Вариант для провайдеров, где multisplit не проходит: сегменты уходят в обратном порядке, фейк с badseq. Списки те же: general, blocked и автосписок.",
+  "description": "Вариант для провайдеров, где multisplit не проходит: сегменты уходят в обратном порядке, фейк с badseq. Списки те же: general, blocked и автосписок. Голос Discord: фейк для UDP discord/stun.",
   "intercept": {
     "tcp": "80,443",
-    "udp": "443"
+    "udp": "443,19294-19344,50000-50100"
   },
   "profiles": [
     {
@@ -33,6 +33,14 @@
         "dpi-desync-fooling=badseq",
         "dpi-desync-fake-tls=!",
         "dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com"
+      ]
+    },
+    {
+      "args": [
+        "filter-udp=19294-19344,50000-50100",
+        "filter-l7=discord,stun",
+        "dpi-desync=fake",
+        "dpi-desync-repeats=6"
       ]
     }
   ]

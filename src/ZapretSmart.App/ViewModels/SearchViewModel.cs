@@ -83,6 +83,12 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _summary = "";
     [ObservableProperty] private string _resultName = "Найденная стратегия";
 
+    /// <summary>Добавить к найденной стратегии QUIC (UDP 443): на нём Chrome грузит видео и Shorts YouTube.</summary>
+    [ObservableProperty] private bool _addQuic = true;
+
+    /// <summary>Добавить к найденной стратегии голос Discord (UDP): поиск его не проверяет и без этого не трогает.</summary>
+    [ObservableProperty] private bool _addVoice = true;
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
     [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
@@ -219,8 +225,17 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         var name = string.IsNullOrWhiteSpace(ResultName) ? "Найденная стратегия" : ResultName.Trim();
         var id = UserStrategyStore.NewId();
         // Сайты, на которых стратегию нашли, кладём в собственный список: в general и blocked их может не быть.
-        var s = CandidateGenerator.ToStrategy(Best!.Candidate, id, name, [id, "general", Subscriptions.BlockedDomains.Id], autoHostlist: true,
-            $"Найдена поиском {DateTime.Now:dd.MM.yyyy}: {Best.Passed}/{Best.Total} целей, {Best.MedianLatency.TotalMilliseconds:0} мс. {Best.Candidate.Label}. Списки: сайты из поиска ({id}), general, blocked и автосписок. QUIC не перехватывается.");
+        string[] lists = [id, "general", Subscriptions.BlockedDomains.Id];
+        var udp = (AddQuic, AddVoice) switch
+        {
+            (true, true) => " " + UdpProfiles.UdpNote,
+            (true, false) => " UDP: QUIC (видео и Shorts YouTube), настройки из готовой стратегии, поиском не проверялся. Голос Discord не перехватывается.",
+            (false, true) => " UDP: голос Discord, настройки из готовой стратегии, поиском не проверялся. QUIC не перехватывается.",
+            _ => " QUIC и голос Discord не перехватываются.",
+        };
+        var s = UdpProfiles.Add(CandidateGenerator.ToStrategy(Best!.Candidate, id, name, lists, autoHostlist: true,
+            $"Найдена поиском {DateTime.Now:dd.MM.yyyy}: {Best.Passed}/{Best.Total} целей, {Best.MedianLatency.TotalMilliseconds:0} мс. {Best.Candidate.Label}. Списки: сайты из поиска ({id}), general, blocked и автосписок." + udp),
+            AddQuic, AddVoice, lists);
         try
         {
             _main.ListStore.WriteHostlist(id, SearchTargets.Hosts(_blocked));

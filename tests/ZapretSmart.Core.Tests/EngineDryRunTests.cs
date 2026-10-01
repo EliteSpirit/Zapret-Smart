@@ -77,6 +77,9 @@ public class EngineDryRunTests
         _ = label;
         var c = new Candidate(label, args.Split('\n'));
         AssertEngineAccepts(EngineCommandBuilder.Build(CandidateGenerator.ToStrategy(c, "t", "t", ["general", "blocked"], true, ""), Layout).Argv);
+        // Так стратегия сохраняется после поиска: с QUIC и голосом Discord.
+        var saved = UdpProfiles.Add(CandidateGenerator.ToStrategy(c, "t", "t", ["general", "blocked"], true, ""), true, true, ["general", "blocked"]);
+        AssertEngineAccepts(EngineCommandBuilder.Build(saved, Layout).Argv);
     }
 
     [EngineTheory]

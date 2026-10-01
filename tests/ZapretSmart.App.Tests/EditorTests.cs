@@ -184,8 +184,10 @@ public sealed class EditorTests : IDisposable
     {
         var ed = CreateVm().Editor;
         ed.SelectedItem = ed.Items.First(i => i.Strategy.Id == "general-multisplit");
-        Assert.All(ed.Profiles, p => Assert.Equal(["blocked", "general"], p.HostToggles.Where(t => t.IsChecked).Select(t => t.Id)));
+        Assert.All(ed.Profiles.Take(3), p => Assert.Equal(["blocked", "general"], p.HostToggles.Where(t => t.IsChecked).Select(t => t.Id)));
         Assert.True(ed.Profiles[2].AutoHostlist);
+        // Голос Discord узнаётся по протоколу, списков у него нет.
+        Assert.DoesNotContain(ed.Profiles[3].HostToggles, t => t.IsChecked);
     }
 
     [AvaloniaFact]

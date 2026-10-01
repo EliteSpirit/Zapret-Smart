@@ -427,6 +427,12 @@
                     <Button DockPanel.Dock="Right" Classes="primary" Content="Сохранить стратегию" Command="{Binding SaveResultCommand}" Margin="10,0,0,0" />
                     <TextBox Text="{Binding ResultName}" VerticalAlignment="Center" />
                   </DockPanel>
+                  <StackPanel Spacing="2" IsVisible="{Binding Best, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <CheckBox IsChecked="{Binding AddQuic}" Content="Добавить QUIC (UDP 443): на нём Chrome грузит видео и Shorts YouTube" />
+                    <CheckBox IsChecked="{Binding AddVoice}" Content="Добавить голос Discord (UDP)" />
+                    <TextBlock Classes="caption" TextWrapping="Wrap"
+                               Text="Поиск проверяет только HTTPS по TCP. QUIC и голос Discord он проверить не может (голосовой сервер отвечает только участнику звонка), поэтому они добавляются с настройками из готовых стратегий." />
+                  </StackPanel>
                 </StackPanel>
               </Border>
 
