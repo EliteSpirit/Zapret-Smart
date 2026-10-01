@@ -555,6 +555,42 @@ public sealed class ShareTests : IAsyncDisposable
     [InlineData("Ok.", 1)]
     public void DeletedFirewallRulesAreCounted(string output, int count) => Assert.Equal(count, ShareFirewall.CountDeleted(output));
 
+    /// <summary>
+    /// iPhone с профилем ходит через прокси даже к самому ПК: «открой http://адрес-ПК:8880/i». Раньше прокси отвечал на
+    /// это 403 (запрет на свой порт), теперь отвечает сам. Свой порт на чужом адресе по-прежнему запрещён.
+    /// </summary>
+    [Fact]
+    public async Task RequestsToTheProxyItselfThroughTheProxyAreServedLocally()
+    {
+        WifiNetwork wifi = new("Home", "secret123", IPAddress.Parse("192.168.31.40"));
+        var proxy = Proxy(new ShareProxyOptions { Port = 0, BindAddress = IPAddress.Loopback, Wifi = () => wifi });
+
+        async Task<string> Ask(string request)
+        {
+            using var phone = await Connect(proxy.Port);
+            await Send(phone, request);
+            return await ReadUntil(phone, "", toEnd: true);
+        }
+
+        var pac = await Ask($"GET http://127.0.0.1:{proxy.Port}/proxy.pac HTTP/1.1\r\nHost: 127.0.0.1:{proxy.Port}\r\n\r\n");
+        Assert.StartsWith("HTTP/1.1 200", pac);
+        Assert.Contains("FindProxyForURL", pac);
+        var profile = await Ask($"GET http://127.0.0.1:{proxy.Port}/i.mobileconfig HTTP/1.1\r\n\r\n");
+        Assert.Contains("application/x-apple-aspen-config", profile);
+        Assert.StartsWith("HTTP/1.1 403", await Ask($"GET http://10.9.9.9:{proxy.Port}/i HTTP/1.1\r\n\r\n"));
+    }
+
+    /// <summary>Автонастройка шлёт мимо прокси сам ПК и локальные сети: роутер, принтер и страница /i открываются напрямую.</summary>
+    [Fact]
+    public void PacSendsThePcAndLocalNetworksDirect()
+    {
+        var pac = ShareProxy.Pac(IPAddress.Parse("192.168.31.40"), 8880);
+        Assert.Contains("if (host == \"192.168.31.40\") return \"DIRECT\";", pac);
+        foreach (var net in new[] { "\"10.0.0.0\", \"255.0.0.0\"", "\"172.16.0.0\", \"255.240.0.0\"", "\"192.168.0.0\", \"255.255.0.0\"", "\"127.0.0.0\", \"255.0.0.0\"" })
+            Assert.Contains(net, pac);
+        Assert.EndsWith("return \"PROXY 192.168.31.40:8880; DIRECT\";\n}\n", pac);
+    }
+
     [Theory]
     [InlineData("GARBAGE\r\n\r\n", "400")]
     [InlineData("CONNECT no-port-here:x HTTP/1.1\r\n\r\n", "400")]
@@ -809,8 +845,11 @@ public sealed class ShareTests : IAsyncDisposable
             Assert.StartsWith("HTTP/1.1 200", page.Head);
             Assert.Contains("text/html", page.Head);
             var html = Encoding.UTF8.GetString(page.Body);
-            Assert.Contains("src=\"/intro.mp4\"", html);
-            Assert.Contains("playsinline muted autoplay", html);
+            Assert.Contains("src=\"/intro.mp4#t=0.1\"", html);
+            // Сама ничего не запускает: со звуком iOS играет только после нажатия, а без него человек не успевал включить звук.
+            Assert.DoesNotContain("autoplay", html);
+            Assert.Contains("Смотреть со звуком", html);
+            Assert.Contains("color-scheme\" content=\"light", html);
             Assert.Contains("href=\"/i.mobileconfig\"", html);
             Assert.DoesNotContain("—", html);
 
