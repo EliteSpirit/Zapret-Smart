@@ -756,6 +756,100 @@ public sealed class ShareTests : IAsyncDisposable
         Assert.True(wifi is null || wifi.Ssid.Length > 0);
     }
 
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("items=0-1", null)]
+    [InlineData("bytes=0-1", "0-1")]
+    [InlineData("bytes=0-", "0-999")]
+    [InlineData("bytes=990-5000", "990-999")]
+    [InlineData("bytes=-3", "997-999")]
+    [InlineData("bytes=-5000", "0-999")]
+    [InlineData("bytes=0-1,5-6", null)]
+    [InlineData("bytes=5-1", null)]
+    [InlineData("bytes=abc", null)]
+    [InlineData("bytes=1000-", "unsatisfiable")]
+    public void RangeHeadersAreReadLikeBrowsersSendThem(string? header, string? expected)
+    {
+        var r = IntroPage.ParseRange(header, 1000);
+        var actual = r is null ? null : r.Value.Satisfiable ? $"{r.Value.Start}-{r.Value.End}" : "unsatisfiable";
+        Assert.Equal(expected, actual);
+    }
+
+    private static (string Head, byte[] Body) SplitResponse(string response)
+    {
+        var end = response.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        return (response[..end], Encoding.Latin1.GetBytes(response[(end + 4)..]));
+    }
+
+    /// <summary>
+    /// /i с роликом: страница, потом профиль по /i.mobileconfig. Ролик отдаётся кусками по Range, как его просит
+    /// Safari на iPhone; без имени сети и без файла ролика /i ведёт себя как раньше.
+    /// </summary>
+    [Fact]
+    public async Task IntroPagePlaysTheReelInRangesAndThenGivesTheProfile()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "zs-intro-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var video = Path.Combine(dir, "intro.mp4");
+        var bytes = Enumerable.Range(0, 1000).Select(i => (byte)(i * 7)).ToArray();
+        File.WriteAllBytes(video, bytes);
+        try
+        {
+            WifiNetwork? wifi = new("Home", "secret123", IPAddress.Parse("192.168.31.40"));
+            var proxy = Proxy(new ShareProxyOptions { Port = 0, BindAddress = IPAddress.Loopback, Wifi = () => wifi, IntroVideo = video });
+
+            async Task<(string Head, byte[] Body)> Get(string request)
+            {
+                using var phone = await Connect(proxy.Port);
+                await Send(phone, request);
+                return SplitResponse(await ReadUntil(phone, "", toEnd: true));
+            }
+
+            var page = await Get("GET /i HTTP/1.1\r\n\r\n");
+            Assert.StartsWith("HTTP/1.1 200", page.Head);
+            Assert.Contains("text/html", page.Head);
+            var html = Encoding.UTF8.GetString(page.Body);
+            Assert.Contains("src=\"/intro.mp4\"", html);
+            Assert.Contains("playsinline muted autoplay", html);
+            Assert.Contains("href=\"/i.mobileconfig\"", html);
+            Assert.DoesNotContain("—", html);
+
+            var profile = await Get("GET /i.mobileconfig HTTP/1.1\r\n\r\n");
+            Assert.Contains("application/x-apple-aspen-config", profile.Head);
+            Assert.Contains("<string>Home</string>", Encoding.UTF8.GetString(profile.Body));
+
+            var probe = await Get("GET /intro.mp4 HTTP/1.1\r\nRange: bytes=0-1\r\n\r\n");
+            Assert.StartsWith("HTTP/1.1 206", probe.Head);
+            Assert.Contains("Content-Range: bytes 0-1/1000", probe.Head);
+            Assert.Equal(bytes[..2], probe.Body);
+
+            var tail = await Get("GET /intro.mp4 HTTP/1.1\r\nRange: bytes=-3\r\n\r\n");
+            Assert.Equal(bytes[^3..], tail.Body);
+
+            var whole = await Get("GET /intro.mp4 HTTP/1.1\r\n\r\n");
+            Assert.StartsWith("HTTP/1.1 200", whole.Head);
+            Assert.Contains("Accept-Ranges: bytes", whole.Head);
+            Assert.Equal(bytes, whole.Body);
+
+            Assert.StartsWith("HTTP/1.1 416", (await Get("GET /intro.mp4 HTTP/1.1\r\nRange: bytes=1000-\r\n\r\n")).Head);
+            var head = await Get("HEAD /intro.mp4 HTTP/1.1\r\n\r\n");
+            Assert.Contains("Content-Length: 1000", head.Head);
+            Assert.Empty(head.Body);
+
+            wifi = null;
+            Assert.StartsWith("HTTP/1.1 404", (await Get("GET /i HTTP/1.1\r\n\r\n")).Head);
+
+            File.Delete(video);
+            wifi = new("Home", "secret123", IPAddress.Parse("192.168.31.40"));
+            Assert.Contains("application/x-apple-aspen-config", (await Get("GET /i HTTP/1.1\r\n\r\n")).Head);
+            Assert.StartsWith("HTTP/1.1 404", (await Get("GET /intro.mp4 HTTP/1.1\r\n\r\n")).Head);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ProfileIsServedOnlyWhileTheHotspotIsKnown()
     {

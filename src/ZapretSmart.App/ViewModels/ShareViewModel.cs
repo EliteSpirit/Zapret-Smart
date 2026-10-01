@@ -486,6 +486,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
             Port = Port,
             Wifi = CurrentWifi,
             LogTargets = () => _main.ShareLogSites,
+            IntroVideo = Path.Combine(AppContext.BaseDirectory, "share", "intro.mp4"),
             // Без движка раздачи (не Windows) порты не важны; в Windows по ним движок раздачи находит свой трафик.
             OutboundPorts = OperatingSystem.IsWindows() ? EngineCommandBuilder.ShareLocalPorts : null,
         });

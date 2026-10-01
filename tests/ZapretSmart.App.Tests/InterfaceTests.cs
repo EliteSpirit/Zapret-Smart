@@ -312,6 +312,31 @@ public sealed class InterfaceTests : IDisposable
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Ролик заставки лежит в поставке, это MP4 с H.264, и индекс moov у него стоит до данных: иначе Safari на iPhone
+    /// ждал бы загрузки всего файла, прежде чем начать показ.
+    /// </summary>
+    [AvaloniaFact]
+    public void TheIntroReelShipsWithTheAppAndStartsPlayingRightAway()
+    {
+        var file = Path.Combine(AppContext.BaseDirectory, "share", "intro.mp4");
+        Assert.True(File.Exists(file), file);
+        var data = File.ReadAllBytes(file);
+        var top = new List<string>();
+        for (long off = 0; off + 8 <= data.Length;)
+        {
+            long size = (uint)(data[off] << 24 | data[off + 1] << 16 | data[off + 2] << 8 | data[off + 3]);
+            var type = System.Text.Encoding.ASCII.GetString(data, (int)off + 4, 4);
+            if (size == 1) size = (long)BitConverter.ToUInt64(data.AsSpan((int)off + 8, 8).ToArray().Reverse().ToArray());
+            if (size < 8) break;
+            top.Add(type);
+            off += size;
+        }
+        Assert.Equal("ftyp", top[0]);
+        Assert.True(top.IndexOf("moov") >= 0 && top.IndexOf("moov") < top.IndexOf("mdat"), string.Join(",", top));
+        Assert.True(data.AsSpan().IndexOf("avc1"u8) > 0);
+    }
+
     /// <summary>Сводка по устройству вместо адресов сайтов; «Очистить журнал» удаляет файл, где они могли остаться.</summary>
     [AvaloniaFact]
     public void ShareLogSummarisesDevicesAndCanBeCleared()
