@@ -233,6 +233,13 @@ public sealed class ShareProxy : IAsyncDisposable
             {
                 host = uri.IdnHost.Trim('[', ']');
                 port = uri.Port;
+                // Телефон с прокси просит прокси открыть сам прокси (страницу /i, видео, профиль): это наш адрес и наш
+                // порт, отвечаем сами. Иначе правило «не к своему порту» давало 403.
+                if (port == Port && request.Method is "GET" or "HEAD" && IsSelf(host, client))
+                {
+                    await ServeLocalAsync(client, remote, request with { Target = uri.PathAndQuery }, ct);
+                    return;
+                }
             }
             else
             {
@@ -433,6 +440,18 @@ public sealed class ShareProxy : IAsyncDisposable
         await client.SendAsync(body, SocketFlags.None, ct);
     }
 
+    /// <summary>Адрес из запроса указывает на сам ПК: тот адрес, по которому к нам пришли, или loopback.</summary>
+    private static bool IsSelf(string host, Socket client)
+    {
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!IPAddress.TryParse(host, out var ip)) return false;
+        if (IPAddress.IsLoopback(ip)) return true;
+        var local = ((IPEndPoint)client.LocalEndPoint!).Address;
+        if (local.IsIPv4MappedToIPv6) local = local.MapToIPv4();
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        return ip.Equals(local);
+    }
+
     private void Log(IPAddress remote, string text) => Logged?.Invoke(remote, text);
 
     /// <summary>То, что прислало устройство, в журнал попадает коротким и без управляющих символов.</summary>
@@ -446,9 +465,19 @@ public sealed class ShareProxy : IAsyncDisposable
     /// Файл автонастройки: всё через ПК, а если ПК недоступен (выключен, ушли из дома), напрямую.
     /// Локальные имена всегда напрямую.
     /// </summary>
+    /// <summary>
+    /// Файл автонастройки. Мимо прокси идут сам ПК и локальные адреса (роутер, принтер, другие устройства): им прокси
+    /// не нужен, а запрос к самому ПК через прокси прокси раньше отклонял. isInNet только для адресов-цифр: для имени он
+    /// полез бы в DNS на каждый запрос.
+    /// </summary>
     public static string Pac(IPAddress address, int port) =>
         "function FindProxyForURL(url, host) {\n"
         + "  if (isPlainHostName(host) || dnsDomainIs(host, \".local\")) return \"DIRECT\";\n"
+        + $"  if (host == \"{address}\") return \"DIRECT\";\n"
+        + "  if (/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(host) && (isInNet(host, \"10.0.0.0\", \"255.0.0.0\")\n"
+        + "      || isInNet(host, \"172.16.0.0\", \"255.240.0.0\") || isInNet(host, \"192.168.0.0\", \"255.255.0.0\")\n"
+        + "      || isInNet(host, \"127.0.0.0\", \"255.0.0.0\") || isInNet(host, \"169.254.0.0\", \"255.255.0.0\")))\n"
+        + "    return \"DIRECT\";\n"
         + $"  return \"PROXY {address}:{port}; DIRECT\";\n"
         + "}\n";
 
