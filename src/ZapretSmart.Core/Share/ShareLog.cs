@@ -35,6 +35,25 @@ public sealed class ShareLog
         return profile.Length > 3 ? text.Replace(profile.TrimEnd('\\', '/'), "%USERPROFILE%", StringComparison.OrdinalIgnoreCase) : text;
     }
 
+    /// <summary>Удаляет журнал и его прошлую часть: в старых версиях туда попадали адреса сайтов.</summary>
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _lastWritten.Clear();
+            foreach (var path in new[] { FilePath, OldFilePath })
+            {
+                try
+                {
+                    File.Delete(path);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+    }
+
     /// <summary>
     /// Пишет строку. С collapseRepeats такая же строка, записанная меньше минуты назад, пропускается, и ответ false.
     /// </summary>

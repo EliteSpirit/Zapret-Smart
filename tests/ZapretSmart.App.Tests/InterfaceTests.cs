@@ -312,6 +312,26 @@ public sealed class InterfaceTests : IDisposable
         return sb.ToString();
     }
 
+    /// <summary>Сводка по устройству вместо адресов сайтов; «Очистить журнал» удаляет файл, где они могли остаться.</summary>
+    [AvaloniaFact]
+    public void ShareLogSummarisesDevicesAndCanBeCleared()
+    {
+        var ip = System.Net.IPAddress.Parse("192.168.31.146");
+        Assert.Equal("192.168.31.146: за 10 мин через ПК прошло соединений: 37",
+            ShareViewModel.DescribeTally(ip, new ZapretSmart.Core.Share.ClientTally(37, 0, 0, 0, 0), 10));
+        Assert.Equal("192.168.31.146: за 10 мин через ПК прошло соединений: 5; ошибки: имя сайта не найдено 2, сервер не ответил 1",
+            ShareViewModel.DescribeTally(ip, new ZapretSmart.Core.Share.ClientTally(5, 2, 1, 0, 0), 10));
+
+        using var vm = CreateVm();
+        Assert.False(vm.ShareLogSites);
+        Directory.CreateDirectory(_data);
+        File.WriteAllText(vm.Share.LogFile, "2026-10-01 15:20:23 192.168.31.146: открыл api.facebook.com:443\n");
+        File.WriteAllText(Path.ChangeExtension(vm.Share.LogFile, ".old.log"), "старое\n");
+        vm.Share.ClearLogCommand.Execute(null);
+        Assert.DoesNotContain("facebook", File.ReadAllText(vm.Share.LogFile));
+        Assert.False(File.Exists(Path.ChangeExtension(vm.Share.LogFile, ".old.log")));
+    }
+
     /// <summary>
     /// «Включать раздачу при запуске программы» включает её, даже если в прошлый раз её выключили, и сохраняется.
     /// Автозапуск с Windows в тестах недоступен (не настоящее приложение) и ничего не меняет.

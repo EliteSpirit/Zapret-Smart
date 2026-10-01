@@ -485,6 +485,7 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         {
             Port = Port,
             Wifi = CurrentWifi,
+            LogTargets = () => _main.ShareLogSites,
             // Без движка раздачи (не Windows) порты не важны; в Windows по ним движок раздачи находит свой трафик.
             OutboundPorts = OperatingSystem.IsWindows() ? EngineCommandBuilder.ShareLocalPorts : null,
         });
@@ -505,6 +506,10 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
         }
         _proxy = proxy;
         Port = proxy.Port;
+        _talliesSince = DateTime.Now;
+        _tallyTimer?.Stop();
+        _tallyTimer = new DispatcherTimer(TallyInterval, DispatcherPriority.Background, (_, _) => FlushTallies());
+        _tallyTimer.Start();
         proxy.ClientConnected += ip => Dispatcher.UIThread.Post(() =>
         {
             LastClient = $"Последнее подключение: {ip} в {DateTime.Now:HH:mm}";
@@ -574,8 +579,11 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     {
         var proxy = _proxy;
         _proxy = null;
+        _tallyTimer?.Stop();
+        _tallyTimer = null;
         if (proxy is not null)
         {
+            FlushTallies(proxy);
             await proxy.DisposeAsync();
             Log("прокси остановлен");
         }
@@ -686,6 +694,43 @@ public sealed partial class ShareViewModel : ObservableObject, IDisposable
     }
 
     public string LogFile => _log.FilePath;
+
+    /// <summary>Как часто писать в журнал сводку по устройствам вместо адресов сайтов.</summary>
+    public static readonly TimeSpan TallyInterval = TimeSpan.FromMinutes(10);
+
+    private DispatcherTimer? _tallyTimer;
+    private DateTime _talliesSince;
+
+    /// <summary>
+    /// Сводка по каждому устройству: сколько соединений прошло через ПК и какие были ошибки. Так журнал показывает,
+    /// что раздача работает, но не показывает, какие сайты открывали.
+    /// </summary>
+    private void FlushTallies(ShareProxy? proxy = null)
+    {
+        proxy ??= _proxy;
+        if (proxy is null) return;
+        var minutes = Math.Max(1, (int)Math.Round((DateTime.Now - _talliesSince).TotalMinutes));
+        _talliesSince = DateTime.Now;
+        foreach (var (client, t) in proxy.TakeTallies()) Log(DescribeTally(client, t, minutes));
+    }
+
+    public static string DescribeTally(IPAddress client, ClientTally t, int minutes)
+    {
+        var text = $"{client}: за {minutes} мин через ПК прошло соединений: {t.Connections}";
+        var errors = new List<string>();
+        if (t.NameNotFound > 0) errors.Add($"имя сайта не найдено {t.NameNotFound}");
+        if (t.Unreachable > 0) errors.Add($"сервер не ответил {t.Unreachable}");
+        if (t.Refused > 0) errors.Add($"отказано {t.Refused}");
+        if (t.BadRequests > 0) errors.Add($"непонятных запросов {t.BadRequests}");
+        return errors.Count == 0 ? text : text + "; ошибки: " + string.Join(", ", errors);
+    }
+
+    [RelayCommand]
+    private void ClearLog()
+    {
+        _log.Clear();
+        Log("журнал раздачи очищен");
+    }
 
     /// <summary>Программа, для которой ставится правило брандмауэра: сам ZapretSmart.exe, в тестах подставной путь.</summary>
     private string? FirewallProgram => _main.Paths.FirewallProgram ?? Environment.ProcessPath;

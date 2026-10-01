@@ -29,6 +29,18 @@ public sealed class ShareProxyOptions
 
     /// <summary>Сеть точки доступа ПК для профиля iPhone; null — точка доступа выключена или неизвестна.</summary>
     public Func<WifiNetwork?> Wifi { get; init; } = () => null;
+
+    /// <summary>
+    /// Писать в журнал адреса сайтов. По умолчанию нет: журнал тогда стал бы историей посещений всех, кто подключён
+    /// к раздаче, а его присылают для разбора. Без адресов в журнале остаются сводки и виды ошибок.
+    /// </summary>
+    public Func<bool> LogTargets { get; init; } = () => false;
+}
+
+/// <summary>Что прошло через прокси от одного устройства с прошлой сводки.</summary>
+public sealed record ClientTally(int Connections, int NameNotFound, int Unreachable, int Refused, int BadRequests)
+{
+    public bool IsEmpty => Connections + NameNotFound + Unreachable + Refused + BadRequests == 0;
 }
 
 /// <summary>
@@ -80,6 +92,24 @@ public sealed class ShareProxy : IAsyncDisposable
 
     private const int MaxReportedTargets = 500;
     private readonly ConcurrentDictionary<string, byte> _reportedTargets = new();
+
+    /// <summary>Счётчики по устройствам: [0] соединения, [1] имя не найдено, [2] не отвечает, [3] отказ, [4] непонятный запрос.</summary>
+    private readonly ConcurrentDictionary<IPAddress, int[]> _tallies = new();
+
+    private void Count(IPAddress client, int kind) => Interlocked.Increment(ref _tallies.GetOrAdd(client, _ => new int[5])[kind]);
+
+    /// <summary>Счётчики с прошлого вызова по каждому устройству; после вызова они начинаются заново.</summary>
+    public IReadOnlyList<(IPAddress Client, ClientTally Tally)> TakeTallies()
+    {
+        var result = new List<(IPAddress, ClientTally)>();
+        foreach (var (client, c) in _tallies)
+        {
+            var t = new ClientTally(Interlocked.Exchange(ref c[0], 0), Interlocked.Exchange(ref c[1], 0),
+                Interlocked.Exchange(ref c[2], 0), Interlocked.Exchange(ref c[3], 0), Interlocked.Exchange(ref c[4], 0));
+            if (!t.IsEmpty) result.Add((client, t));
+        }
+        return result;
+    }
 
     public void Start()
     {
@@ -170,6 +200,7 @@ public sealed class ShareProxy : IAsyncDisposable
             var request = ProxyRequest.Parse(head.Value.Head);
             if (request is null)
             {
+                Count(remote, 4);
                 Log(remote, "непонятный запрос: это не HTTP-прокси запрос");
                 await ReplyAsync(client, 400, "Bad Request", ct);
                 return;
@@ -187,7 +218,8 @@ public sealed class ShareProxy : IAsyncDisposable
             {
                 if (!TrySplitHostPort(request.Target, 443, out host, out port))
                 {
-                    Log(remote, $"непонятный адрес в CONNECT: {Clean(request.Target)}");
+                    Count(remote, 4);
+                    Log(remote, _options.LogTargets() ? $"непонятный адрес в CONNECT: {Clean(request.Target)}" : "непонятный адрес в CONNECT");
                     await ReplyAsync(client, 400, "Bad Request", ct);
                     return;
                 }
@@ -199,15 +231,20 @@ public sealed class ShareProxy : IAsyncDisposable
             }
             else
             {
+                Count(remote, 4);
                 Log(remote, $"запрос {Clean(request.Method)} не к http-адресу, отказ");
                 await ReplyAsync(client, 400, "Bad Request", ct);
                 return;
             }
 
+            // Адрес сайта в журнал только по флагу LogTargets: иначе журнал становится историей посещений.
+            var detailed = _options.LogTargets();
             var target = $"{Clean(host)}:{port}";
+            string Site(string what) => detailed ? $"{target}: {what}" : what;
             if (NetworkPolicy.BlockedPorts.Contains(port) || port == Port || port is <= 0 or > 65535)
             {
-                Log(remote, $"{target}: порт запрещён (почта или сам прокси)");
+                Count(remote, 3);
+                Log(remote, detailed ? $"{target}: порт запрещён (почта или сам прокси)" : $"порт {port} запрещён (почта или сам прокси)");
                 await ReplyAsync(client, 403, "Forbidden", ct);
                 return;
             }
@@ -219,14 +256,16 @@ public sealed class ShareProxy : IAsyncDisposable
             }
             catch (SocketException)
             {
-                Log(remote, $"{target}: имя не найдено в DNS");
+                Count(remote, 1);
+                Log(remote, Site("имя сайта не найдено в DNS"));
                 await ReplyAsync(client, 502, "Bad Gateway", ct);
                 return;
             }
             var allowed = addresses.Where(_options.AllowDestination).ToArray();
             if (allowed.Length == 0)
             {
-                Log(remote, addresses.Length == 0 ? $"{target}: имя не найдено в DNS" : $"{target}: адрес внутри ПК или сети, отказ");
+                Count(remote, addresses.Length == 0 ? 1 : 3);
+                Log(remote, Site(addresses.Length == 0 ? "имя сайта не найдено в DNS" : "адрес сайта внутри ПК или сети, отказ"));
                 await ReplyAsync(client, addresses.Length == 0 ? 502 : 403, addresses.Length == 0 ? "Bad Gateway" : "Forbidden", ct);
                 return;
             }
@@ -234,11 +273,13 @@ public sealed class ShareProxy : IAsyncDisposable
             upstream = await ConnectAsync(allowed, port, ct);
             if (upstream is null)
             {
-                Log(remote, $"{target}: сервер не отвечает");
+                Count(remote, 2);
+                Log(remote, Site("сервер сайта не отвечает"));
                 await ReplyAsync(client, 502, "Bad Gateway", ct);
                 return;
             }
-            if (_reportedTargets.Count < MaxReportedTargets && _reportedTargets.TryAdd($"{remote} {target}", 0))
+            Count(remote, 0);
+            if (detailed && _reportedTargets.Count < MaxReportedTargets && _reportedTargets.TryAdd($"{remote} {target}", 0))
                 Log(remote, $"открыл {target}");
 
             if (request.Method == "CONNECT")

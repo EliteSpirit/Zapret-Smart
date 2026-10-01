@@ -48,6 +48,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _watchdogEnabled = _settings.WatchdogEnabled;
         _closeToTray = _settings.CloseToTray;
         _shareAutoStart = _settings.ShareAutoStart;
+        _shareLogSites = _settings.ShareLogSites;
         _theme = AppTheme.Find(_settings.ThemeId);
         _animatedBackdrop = _settings.AnimatedBackdrop;
         _menuOnTop = _settings.MenuOnTop;
@@ -199,6 +200,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _shareAutoStart;
 
     partial void OnShareAutoStartChanged(bool value) => SaveSettings(_settings with { ShareAutoStart = value });
+
+    /// <summary>Писать в журнал раздачи адреса сайтов. Прокси читает значение на каждом запросе.</summary>
+    [ObservableProperty] private bool _shareLogSites;
+
+    partial void OnShareLogSitesChanged(bool value) => SaveSettings(_settings with { ShareLogSites = value });
 
     /// <summary>
     /// Запуск вместе с Windows (задача Планировщика). Значение берётся из самого Планировщика, а не из настроек:
