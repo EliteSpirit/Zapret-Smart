@@ -35,6 +35,11 @@ public sealed class ShareProxyOptions
     /// к раздаче, а его присылают для разбора. Без адресов в журнале остаются сводки и виды ошибок.
     /// </summary>
     public Func<bool> LogTargets { get; init; } = () => false;
+
+    /// <summary>
+    /// Ролик, который страница /i показывает перед профилем iPhone. null или файла нет: /i сразу отдаёт профиль.
+    /// </summary>
+    public string? IntroVideo { get; init; }
 }
 
 /// <summary>Что прошло через прокси от одного устройства с прошлой сводки.</summary>
@@ -206,7 +211,7 @@ public sealed class ShareProxy : IAsyncDisposable
                 return;
             }
 
-            if (request.Method == "GET" && request.Target.StartsWith('/'))
+            if (request.Method is "GET" or "HEAD" && request.Target.StartsWith('/'))
             {
                 await ServeLocalAsync(client, remote, request, ct);
                 return;
@@ -330,9 +335,21 @@ public sealed class ShareProxy : IAsyncDisposable
     private async Task ServeLocalAsync(Socket client, IPAddress remote, ProxyRequest request, CancellationToken ct)
     {
         var path = request.Target.Split('?', 2)[0];
-        if (path is "/i" or "/iphone.mobileconfig")
+        var intro = _options.IntroVideo is { } video && File.Exists(video) ? video : null;
+        if (path == "/i" && intro is not null && _options.Wifi() is not null)
+        {
+            await SendAsync(client, 200, "OK", "text/html; charset=utf-8", Encoding.UTF8.GetBytes(IntroPage.Html), "no-store", ct);
+            Log(remote, "открыл страницу профиля iPhone (с заставкой)");
+            return;
+        }
+        if (path is "/i" or IntroPage.ProfilePath or "/iphone.mobileconfig")
         {
             await ServeProfileAsync(client, remote, ct);
+            return;
+        }
+        if (path == IntroPage.VideoPath && intro is not null)
+        {
+            await ServeVideoAsync(client, request, intro, ct);
             return;
         }
         if (path != "/proxy.pac")
@@ -373,6 +390,47 @@ public sealed class ShareProxy : IAsyncDisposable
         await client.SendAsync(Encoding.ASCII.GetBytes(headers), SocketFlags.None, ct);
         await client.SendAsync(bytes, SocketFlags.None, ct);
         Log(remote, $"забрал профиль iPhone для сети «{Clean(wifi.Ssid)}»");
+    }
+
+    /// <summary>
+    /// Ролик заставки. Safari на iPhone не играет видео с сервера без Range: он сначала просит пару байт, потом куски.
+    /// Файл читается кусками, целиком в память не грузится.
+    /// </summary>
+    private static async Task ServeVideoAsync(Socket client, ProxyRequest request, string file, CancellationToken ct)
+    {
+        await using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true);
+        var length = stream.Length;
+        var rangeHeader = request.Headers.FirstOrDefault(h => h.Name.Equals("Range", StringComparison.OrdinalIgnoreCase)).Value;
+        var range = IntroPage.ParseRange(rangeHeader, length);
+        if (range is { Satisfiable: false })
+        {
+            var refuse = $"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{length}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            await client.SendAsync(Encoding.ASCII.GetBytes(refuse), SocketFlags.None, ct);
+            return;
+        }
+        var (start, end) = range is { } r ? (r.Start, r.End) : (0L, length - 1);
+        var count = length == 0 ? 0 : end - start + 1;
+        var headers = (range is null ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 206 Partial Content\r\n" + $"Content-Range: bytes {start}-{end}/{length}\r\n")
+            + $"Content-Type: video/mp4\r\nAccept-Ranges: bytes\r\nContent-Length: {count}\r\nCache-Control: max-age=3600\r\nConnection: close\r\n\r\n";
+        await client.SendAsync(Encoding.ASCII.GetBytes(headers), SocketFlags.None, ct);
+        if (request.Method == "HEAD" || count == 0) return;
+        stream.Seek(start, SeekOrigin.Begin);
+        var buffer = new byte[64 * 1024];
+        while (count > 0)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, count)), ct);
+            if (read == 0) break;
+            await client.SendAsync(buffer.AsMemory(0, read), SocketFlags.None, ct);
+            count -= read;
+        }
+    }
+
+    private static async Task SendAsync(Socket client, int code, string reason, string type, byte[] body, string cache, CancellationToken ct)
+    {
+        var headers = $"HTTP/1.1 {code} {reason}\r\nContent-Type: {type}\r\nContent-Length: {body.Length}\r\n"
+            + $"Cache-Control: {cache}\r\nConnection: close\r\n\r\n";
+        await client.SendAsync(Encoding.ASCII.GetBytes(headers), SocketFlags.None, ct);
+        await client.SendAsync(body, SocketFlags.None, ct);
     }
 
     private void Log(IPAddress remote, string text) => Logged?.Invoke(remote, text);

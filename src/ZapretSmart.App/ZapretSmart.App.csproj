@@ -35,5 +35,6 @@
     <None Include="..\..\engine\files\fake\*.bin" Link="engine\fake\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\lists\*.txt" Link="lists\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\hosts\*.hosts" Link="hosts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\share\intro.mp4" Link="share\intro.mp4" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
