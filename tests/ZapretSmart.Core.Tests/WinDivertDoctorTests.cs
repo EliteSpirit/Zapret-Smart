@@ -63,19 +63,30 @@ public sealed class WinDivertDoctorTests
             var message = WinDivertDoctor.RepairStaleService(serviceName: name);
             Assert.NotNull(message);
             Assert.Contains("Служба удалена", message);
-            Assert.False(ServiceExists(name));
+            Assert.True(await Gone(name));
             Assert.Null(WinDivertDoctor.RepairStaleService(serviceName: name));
 
             // Своя пропавшая служба удаляется молча: о пропавшем файле говорит объяснение кода выхода.
             Assert.Equal(0, await Sc("create", name, "type=", "kernel", "start=", "demand", "binPath=", driver));
             Assert.Null(WinDivertDoctor.RepairStaleService(driver, name));
-            Assert.False(ServiceExists(name));
+            Assert.True(await Gone(name));
         }
         finally
         {
             await Sc("delete", name);
             Directory.Delete(dir, recursive: true);
         }
+    }
+
+    /// <summary>
+    /// Нет ли службы для диспетчера служб: этого ждёт RepairStaleService, и только это видит WinDivert. Ключ реестра
+    /// диспетчер стирает чуть позже, поэтому его ждём отдельно.
+    /// </summary>
+    private static async Task<bool> Gone(string name)
+    {
+        if (await Sc("query", name) != 1060) return false;
+        for (var i = 0; i < 50 && ServiceExists(name); i++) await Task.Delay(100);
+        return !ServiceExists(name);
     }
 
     private static bool ServiceExists(string name) =>

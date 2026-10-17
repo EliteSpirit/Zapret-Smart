@@ -90,12 +90,20 @@ public static class WinDivertDoctor
     private static string? ReadImagePath(string serviceName) =>
         Microsoft.Win32.Registry.GetValue(@"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\" + serviceName, "ImagePath", null) as string;
 
-    /// <summary>null, если службы больше нет или она уже помечена на удаление; иначе текст ошибки.</summary>
+    /// <summary>Сколько ждать, пока Windows уберёт помеченную на удаление службу.</summary>
+    private static readonly TimeSpan GoneTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// null, если службы больше нет; иначе текст ошибки. DeleteService только помечает службу, а убирает её Windows,
+    /// когда закрыты все её дескрипторы. Пока она помечена, WinDivert не может создать её заново и падает с кодом
+    /// 1072, поэтому ждём, пока служба действительно исчезнет.
+    /// </summary>
     [SupportedOSPlatform("windows")]
     private static string? RemoveService(string serviceName)
     {
         const uint ScManagerConnect = 0x0001;
         const uint Delete = 0x00010000;
+        const uint QueryStatus = 0x0004;
         var manager = OpenSCManagerW(null, null, ScManagerConnect);
         if (manager == IntPtr.Zero) return new System.ComponentModel.Win32Exception().Message;
         try
@@ -108,13 +116,26 @@ public static class WinDivertDoctor
             }
             try
             {
-                if (DeleteService(service)) return null;
-                var err = Marshal.GetLastWin32Error();
-                return err == ErrorServiceMarkedForDelete ? null : new System.ComponentModel.Win32Exception(err).Message;
+                if (!DeleteService(service))
+                {
+                    var err = Marshal.GetLastWin32Error();
+                    if (err != ErrorServiceMarkedForDelete) return new System.ComponentModel.Win32Exception(err).Message;
+                }
             }
             finally
             {
                 CloseServiceHandle(service);
+            }
+
+            var deadline = DateTime.UtcNow + GoneTimeout;
+            while (true)
+            {
+                var probe = OpenServiceW(manager, serviceName, QueryStatus);
+                if (probe == IntPtr.Zero && Marshal.GetLastWin32Error() == ErrorServiceDoesNotExist) return null;
+                if (probe != IntPtr.Zero) CloseServiceHandle(probe);
+                if (DateTime.UtcNow >= deadline)
+                    return "служба помечена на удаление, но её держит другая программа. Закройте окно «Службы» (services.msc) или перезагрузите компьютер";
+                Thread.Sleep(100);
             }
         }
         finally
