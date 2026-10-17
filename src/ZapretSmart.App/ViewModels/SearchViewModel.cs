@@ -184,7 +184,10 @@ public sealed partial class SearchViewModel : ObservableObject, IDisposable
         {
             SetStep(0);
             Phase = "Поиск прерван";
-            Summary = e.Message + ". Запущено ли приложение от имени администратора? Не мешает ли антивирус?";
+            // Отказ WinDivert движок уже объяснил строкой «! ...», общий совет поверх него только сбивал бы.
+            Summary = e.Message.Contains("| ! ", StringComparison.Ordinal)
+                ? e.Message
+                : e.Message + ". Запущено ли приложение от имени администратора? Не мешает ли антивирус?";
         }
         catch (FileNotFoundException)
         {
