@@ -43,11 +43,16 @@ public sealed class EngineRunner(string executablePath) : IDisposable
             };
             foreach (var a in argv) psi.ArgumentList.Add(a);
 
+            var ownDriver = Path.Combine(Path.GetDirectoryName(ExecutablePath)!, WinDivertDoctor.DriverFile);
+            if (WinDivertDoctor.RepairStaleService(ownDriver) is { } repaired) Output?.Invoke("! " + repaired);
+
             var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            var openFailed = false;
             p.OutputDataReceived += (_, e) => { if (e.Data is not null) Output?.Invoke(e.Data); };
             p.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data is null) return;
+                if (e.Data.Contains(WinDivertDoctor.OpenFailedMarker, StringComparison.Ordinal)) openFailed = true;
                 ErrorOutput?.Invoke(e.Data);
                 Output?.Invoke(e.Data);
             };
@@ -65,6 +70,12 @@ public sealed class EngineRunner(string executablePath) : IDisposable
                 {
                     // Dispose уже освободил процесс; исключение в пуле потоков уронило бы приложение.
                     return;
+                }
+                // Код выхода winws после отказа WinDivert: это код ошибки Windows, объясняем его по-человечески.
+                if (openFailed && WinDivertDoctor.Explain(code, File.Exists(ownDriver)) is { } hint)
+                {
+                    ErrorOutput?.Invoke("! " + hint);
+                    Output?.Invoke("! " + hint);
                 }
                 Exited?.Invoke(code);
             };

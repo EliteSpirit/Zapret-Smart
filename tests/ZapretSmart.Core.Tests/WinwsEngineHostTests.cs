@@ -117,6 +117,21 @@ public sealed class WinwsEngineHostTests : IDisposable
     }
 
     [UnixFact]
+    public async Task WinDivertFailureIsExplained()
+    {
+        // Так winws сообщает об отказе WinDivertOpen: текст ошибки Windows в stderr и её код как код выхода.
+        using var host = HostWith("echo 'windivert: error opening filter: The system cannot find the file specified.' >&2\nexit 2");
+        var e = await Assert.ThrowsAsync<EngineStartException>(() => host.StartAsync(Probe, CancellationToken.None));
+        Assert.Contains("кодом 2", e.Message);
+        Assert.Contains("| ! Рядом с winws.exe нет WinDivert64.sys", e.Message);
+
+        // Тот же код без отказа WinDivert ничего не объясняет: он мог прийти откуда угодно.
+        using var other = HostWith("echo 'cannot open hostlist' >&2\nexit 2");
+        var e2 = await Assert.ThrowsAsync<EngineStartException>(() => other.StartAsync(Probe, CancellationToken.None));
+        Assert.DoesNotContain("WinDivert64.sys", e2.Message);
+    }
+
+    [UnixFact]
     public async Task MissingMarkerTimesOutAndKillsEngine()
     {
         using var host = HostWith("echo 'starting'\nexec sleep 30", TimeSpan.FromMilliseconds(700));
